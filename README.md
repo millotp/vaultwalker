@@ -6,6 +6,8 @@ A command line interface to browse and edit [Vault](https://www.vaultproject.io/
 
 `cargo install vaultwalker`
 
+Then use with `vaultwalker secret/my_company`
+
 ## Development
 
-Run with `cargo run`.
+Run with `cargo run secret/my_company`.
