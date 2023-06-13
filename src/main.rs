@@ -1,7 +1,7 @@
 mod client;
 mod error;
 
-use std::fs::read_to_string;
+use std::{env::args, fs::read_to_string};
 
 use client::VaultSecret;
 use console::{style, Key, Term};
@@ -61,17 +61,20 @@ struct Vaultwalker {
     client: VaultClient,
     term: Term,
     path: VaultPath,
+    root_len: usize,
     current_list: Vec<VaultEntry>,
     selected_item: usize,
     selected_secret: Option<VaultSecret>,
 }
 
 impl Vaultwalker {
-    fn new(host: String, token: String) -> Self {
+    fn new(host: String, token: String, root: String) -> Self {
+        let path = VaultPath::decode(&root);
         Self {
             client: VaultClient::new(host, token).unwrap(),
             term: Term::stdout(),
-            path: VaultPath::decode("secret/algolia/erc/"),
+            root_len: path.entries.len(),
+            path,
             current_list: vec![],
             selected_item: 0,
             selected_secret: None,
@@ -167,7 +170,7 @@ impl Vaultwalker {
                     self.print();
                 }
                 Key::ArrowLeft => {
-                    if self.path.entries.len() < 4 {
+                    if self.path.entries.len() < self.root_len + 1 {
                         continue;
                     }
                     let len_before = self.current_list.len();
@@ -193,10 +196,15 @@ impl Vaultwalker {
 }
 
 fn main() {
+    let mut root = args().nth(1).expect("A root path is required");
+    if !root.ends_with('/') {
+        root = root + "/";
+    }
+
     let host = std::env::var("VAULT_ADDR").unwrap();
     let token = read_to_string(home_dir().unwrap().join(".vault-token")).unwrap();
 
-    let mut vaultwalker = Vaultwalker::new(host, token);
+    let mut vaultwalker = Vaultwalker::new(host, token, root);
 
     ctrlc::set_handler(move || {
         Term::stdout().show_cursor().unwrap();
