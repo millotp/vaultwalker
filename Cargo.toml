@@ -1,6 +1,6 @@
 [package]
 name = "vaultwalker"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Pierre Millot <millotpierre3@gmail.com>"]
 license = "MIT"
 description = "A CLI tool to browse Hashicorp Vault secrets"
