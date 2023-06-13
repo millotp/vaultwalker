@@ -198,7 +198,7 @@ impl Vaultwalker {
 fn main() {
     let mut root = args().nth(1).expect("A root path is required");
     if !root.ends_with('/') {
-        root = root + "/";
+        root += "/";
     }
 
     let host = std::env::var("VAULT_ADDR").unwrap();
