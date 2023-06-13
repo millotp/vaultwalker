@@ -982,7 +982,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "vaultls"
+name = "vaultwalker"
 version = "0.1.0"
 dependencies = [
  "console",

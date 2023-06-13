@@ -57,7 +57,7 @@ impl VaultPath {
     }
 }
 
-struct Vaultls {
+struct Vaultwalker {
     client: VaultClient,
     term: Term,
     path: VaultPath,
@@ -66,7 +66,7 @@ struct Vaultls {
     selected_secret: Option<VaultSecret>,
 }
 
-impl Vaultls {
+impl Vaultwalker {
     fn new(host: String, token: String) -> Self {
         Self {
             client: VaultClient::new(host, token).unwrap(),
@@ -196,7 +196,7 @@ fn main() {
     let host = std::env::var("VAULT_ADDR").unwrap();
     let token = read_to_string(home_dir().unwrap().join(".vault-token")).unwrap();
 
-    let mut vaultls = Vaultls::new(host, token);
+    let mut Vaultwalker = Vaultwalker::new(host, token);
 
     ctrlc::set_handler(move || {
         Term::stdout().show_cursor().unwrap();
@@ -204,7 +204,7 @@ fn main() {
     })
     .expect("Error setting Ctrl-C handler");
 
-    vaultls.setup();
-    vaultls.print();
-    vaultls.input_loop();
+    Vaultwalker.setup();
+    Vaultwalker.print();
+    Vaultwalker.input_loop();
 }
