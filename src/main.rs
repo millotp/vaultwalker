@@ -3,6 +3,7 @@ mod error;
 
 use std::fs::read_to_string;
 
+use client::VaultSecret;
 use console::{style, Key, Term};
 use home::home_dir;
 
@@ -50,7 +51,7 @@ impl VaultPath {
             entries: path
                 .split_inclusive('/')
                 .filter(|x| !x.is_empty())
-                .map(|x| VaultEntry::decode(x))
+                .map(VaultEntry::decode)
                 .collect(),
         }
     }
@@ -62,6 +63,7 @@ struct Vaultls {
     path: VaultPath,
     current_list: Vec<VaultEntry>,
     selected_item: usize,
+    selected_secret: Option<VaultSecret>,
 }
 
 impl Vaultls {
@@ -72,6 +74,7 @@ impl Vaultls {
             path: VaultPath::decode("secret/algolia/erc/"),
             current_list: vec![],
             selected_item: 0,
+            selected_secret: None,
         }
     }
 
@@ -87,6 +90,17 @@ impl Vaultls {
         self.current_list = res.keys.iter().map(|x| VaultEntry::decode(x)).collect();
     }
 
+    fn update_selected_secret(&mut self) {
+        if self.current_list[self.selected_item].is_dir {
+            self.selected_secret = None;
+            return;
+        }
+        let mut path = self.path.join();
+        path.push_str(&self.current_list[self.selected_item].name);
+        let res = self.client.get_secret(&path).unwrap();
+        self.selected_secret = Some(res);
+    }
+
     fn print(&self) {
         let prefix_len = self.path.len() + 1;
         for (i, item) in self.current_list.iter().enumerate() {
@@ -96,12 +110,22 @@ impl Vaultls {
             } else {
                 line.push_str(&format!("{:prefix$}", "", prefix = prefix_len));
             }
+
             line.push_str(&format!(
                 "{} {}{}",
                 if i == self.selected_item { ">" } else { " " },
                 item.name,
                 if item.is_dir { "/" } else { "" }
             ));
+
+            if let Some(secret) = self.selected_secret.as_ref() {
+                if secret.secret.is_some() && i == self.selected_item {
+                    line.push_str(&format!(
+                        " -> {}",
+                        &style(&secret.secret.as_ref().unwrap()).bold().bright()
+                    ));
+                }
+            }
 
             self.term.write_line(&line).unwrap();
         }
@@ -114,6 +138,7 @@ impl Vaultls {
                     if self.selected_item < self.current_list.len() - 1 {
                         self.selected_item += 1;
                     }
+                    self.update_selected_secret();
                     self.term.clear_last_lines(self.current_list.len()).unwrap();
                     self.print();
                 }
@@ -121,6 +146,7 @@ impl Vaultls {
                     if self.selected_item > 0 {
                         self.selected_item -= 1;
                     }
+                    self.update_selected_secret();
                     self.term.clear_last_lines(self.current_list.len()).unwrap();
                     self.print();
                 }
@@ -136,6 +162,7 @@ impl Vaultls {
                     let len_before = self.current_list.len();
                     self.update_list();
                     self.selected_item = self.selected_item.min(self.current_list.len() - 1);
+                    self.update_selected_secret();
                     self.term.clear_last_lines(len_before).unwrap();
                     self.print();
                 }
@@ -151,6 +178,7 @@ impl Vaultls {
                         .iter()
                         .position(|x| x.name == last.name)
                         .unwrap();
+                    self.update_selected_secret();
                     self.term.clear_last_lines(len_before).unwrap();
                     self.print();
                 }
@@ -168,7 +196,7 @@ fn main() {
     let host = std::env::var("VAULT_ADDR").unwrap();
     let token = read_to_string(home_dir().unwrap().join(".vault-token")).unwrap();
 
-    let mut vaultls = Vaultls::new(host, token.to_owned());
+    let mut vaultls = Vaultls::new(host, token);
 
     ctrlc::set_handler(move || {
         Term::stdout().show_cursor().unwrap();

@@ -36,6 +36,11 @@ pub struct VaultClient {
     token: String,
 }
 
+#[derive(Deserialize, Debug)]
+pub struct VaultSecret {
+    pub secret: Option<String>,
+}
+
 impl VaultClient {
     pub fn new<U: IntoUrl, T: Into<String>>(addr: U, token: T) -> Result<VaultClient> {
         let client = Client::new();
@@ -68,7 +73,7 @@ impl VaultClient {
     }
 
     pub fn get_secret<T: DeserializeOwned + std::fmt::Debug>(&self, path: &str) -> Result<T> {
-        let res = self.read::<T>(Method::GET, &format!("v1/secret/{}", path))?;
+        let res = self.read::<T>(Method::GET, &format!("v1/{}", path))?;
         match res.data {
             Some(data) => Ok(data),
             None => Err(Error::Vault(format!(
