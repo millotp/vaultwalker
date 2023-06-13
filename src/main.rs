@@ -196,7 +196,7 @@ fn main() {
     let host = std::env::var("VAULT_ADDR").unwrap();
     let token = read_to_string(home_dir().unwrap().join(".vault-token")).unwrap();
 
-    let mut Vaultwalker = Vaultwalker::new(host, token);
+    let mut vaultwalker = Vaultwalker::new(host, token);
 
     ctrlc::set_handler(move || {
         Term::stdout().show_cursor().unwrap();
@@ -204,7 +204,7 @@ fn main() {
     })
     .expect("Error setting Ctrl-C handler");
 
-    Vaultwalker.setup();
-    Vaultwalker.print();
-    Vaultwalker.input_loop();
+    vaultwalker.setup();
+    vaultwalker.print();
+    vaultwalker.input_loop();
 }
