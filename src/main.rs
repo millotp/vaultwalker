@@ -146,7 +146,7 @@ impl Vaultwalker {
     fn input_loop(&mut self) {
         loop {
             match self.term.read_key().unwrap() {
-                Key::ArrowDown => {
+                Key::ArrowDown | Key::Char('j') => {
                     if self.selected_item < self.current_list.len() - 1 {
                         self.selected_item += 1;
                     }
@@ -154,7 +154,7 @@ impl Vaultwalker {
                     self.term.clear_last_lines(self.current_list.len()).unwrap();
                     self.print();
                 }
-                Key::ArrowUp => {
+                Key::ArrowUp | Key::Char('k') => {
                     if self.selected_item > 0 {
                         self.selected_item -= 1;
                     }
@@ -162,7 +162,7 @@ impl Vaultwalker {
                     self.term.clear_last_lines(self.current_list.len()).unwrap();
                     self.print();
                 }
-                Key::ArrowRight => {
+                Key::ArrowRight | Key::Char('l') => {
                     if self.path.entries.len() > 32 {
                         continue;
                     }
@@ -178,7 +178,7 @@ impl Vaultwalker {
                     self.term.clear_last_lines(len_before).unwrap();
                     self.print();
                 }
-                Key::ArrowLeft => {
+                Key::ArrowLeft | Key::Char('h') => {
                     if self.path.entries.len() < self.root_len + 1 {
                         continue;
                     }
