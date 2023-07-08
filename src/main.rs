@@ -1,11 +1,16 @@
 mod client;
 mod error;
 
-use std::{env::args, fs::read_to_string};
+use std::{
+    env::args,
+    fs::read_to_string,
+    io::{stdout, Stdout, Write},
+};
 
 use client::VaultSecret;
 use console::{style, Key, Term};
 use home::home_dir;
+use termion::screen::{AlternateScreen, IntoAlternateScreen};
 
 use crate::client::VaultClient;
 
@@ -59,6 +64,7 @@ impl VaultPath {
 
 struct Vaultwalker {
     client: VaultClient,
+    screen: AlternateScreen<Stdout>,
     term: Term,
     path: VaultPath,
     root_len: usize,
@@ -72,6 +78,7 @@ impl Vaultwalker {
         let path = VaultPath::decode(&root);
         Self {
             client: VaultClient::new(host, token).unwrap(),
+            screen: stdout().into_alternate_screen().unwrap(),
             term: Term::stdout(),
             root_len: path.entries.len(),
             path,
@@ -104,7 +111,7 @@ impl Vaultwalker {
         self.selected_secret = Some(res);
     }
 
-    fn print(&self) {
+    fn print(&mut self) {
         let prefix_len = self.path.len() + 1;
         for (i, item) in self.current_list.iter().enumerate() {
             let mut line = String::new();
@@ -132,6 +139,8 @@ impl Vaultwalker {
 
             self.term.write_line(&line).unwrap();
         }
+
+        self.screen.flush().unwrap();
     }
 
     fn input_loop(&mut self) {
@@ -185,7 +194,7 @@ impl Vaultwalker {
                     self.term.clear_last_lines(len_before).unwrap();
                     self.print();
                 }
-                Key::Escape => {
+                Key::Escape | Key::Char('q') => {
                     self.term.show_cursor().unwrap();
                     break;
                 }
@@ -205,12 +214,6 @@ fn main() {
     let token = read_to_string(home_dir().unwrap().join(".vault-token")).unwrap();
 
     let mut vaultwalker = Vaultwalker::new(host, token, root);
-
-    ctrlc::set_handler(move || {
-        Term::stdout().show_cursor().unwrap();
-        std::process::exit(0);
-    })
-    .expect("Error setting Ctrl-C handler");
 
     vaultwalker.setup();
     vaultwalker.print();

@@ -1,5 +1,7 @@
 # Vaultwalker
 
+![version](https://img.shields.io/crates/v/vaultwalker) ![downloads](https://img.shields.io/crates/d/vaultwalker)
+
 A command line interface to browse and edit [Vault](https://www.vaultproject.io/) secrets.
 
 ## How to install
