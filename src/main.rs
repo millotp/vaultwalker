@@ -2,10 +2,15 @@ mod client;
 mod error;
 
 use std::{
-    env::args,
     fs::read_to_string,
     io::{stdout, Stdout, Write},
 };
+
+use clap::Parser;
+
+extern crate clipboard;
+
+use clipboard::{ClipboardContext, ClipboardProvider};
 
 use client::VaultSecret;
 use console::{style, Key, Term};
@@ -62,10 +67,29 @@ impl VaultPath {
     }
 }
 
+#[derive(Parser, Debug)]
+#[command(author, version, about)]
+struct Args {
+    root_path: String,
+    #[arg(
+        short = 'H',
+        long,
+        help = "URL of the vault server, defaults to $VAULT_ADDR"
+    )]
+    host: Option<String>,
+    #[arg(
+        short,
+        long,
+        help = "Vault token, default to the value in ~/.vault-token"
+    )]
+    token: Option<String>,
+}
+
 struct Vaultwalker {
     client: VaultClient,
     screen: AlternateScreen<Stdout>,
     term: Term,
+    clipboard: ClipboardContext,
     path: VaultPath,
     root_len: usize,
     current_list: Vec<VaultEntry>,
@@ -80,6 +104,7 @@ impl Vaultwalker {
             client: VaultClient::new(host, token).unwrap(),
             screen: stdout().into_alternate_screen().unwrap(),
             term: Term::stdout(),
+            clipboard: ClipboardProvider::new().unwrap(),
             root_len: path.entries.len(),
             path,
             current_list: vec![],
@@ -92,6 +117,8 @@ impl Vaultwalker {
         self.term.hide_cursor().unwrap();
         self.term.clear_screen().unwrap();
         self.update_list();
+        self.print();
+        self.print_controls();
         self.screen.flush().unwrap();
     }
 
@@ -142,6 +169,19 @@ impl Vaultwalker {
         }
     }
 
+    fn print_message(&mut self, message: &str) {
+        self.term.move_cursor_down(10000).unwrap();
+        self.term
+            .write_all(style(message).black().on_white().to_string().as_bytes())
+            .unwrap();
+    }
+
+    fn print_controls(&mut self) {
+        self.print_message(
+            "navigate with arrows      C: clear cache      P: copy path      S: copy secret",
+        );
+    }
+
     fn input_loop(&mut self) {
         loop {
             let mut needs_refresh = false;
@@ -187,6 +227,27 @@ impl Vaultwalker {
                 Key::Char('c') => {
                     self.client.clear_cache();
                 }
+                Key::Char('p') => {
+                    let mut path = self.path.join();
+                    path.push_str(&self.current_list[self.selected_item].name);
+                    self.clipboard.set_contents(path).unwrap();
+
+                    self.print_message("path copied to clipboard");
+                }
+                Key::Char('s') => {
+                    let entry = self.current_list[self.selected_item].clone();
+                    if entry.is_dir {
+                        continue;
+                    }
+
+                    if let Some(secret) = self.selected_secret.as_ref() {
+                        if let Some(secret) = secret.secret.as_ref() {
+                            self.clipboard.set_contents(secret.clone()).unwrap();
+
+                            self.print_message("secret copied to clipboard");
+                        }
+                    }
+                }
                 Key::Escape | Key::Char('q') => {
                     self.term.show_cursor().unwrap();
                     break;
@@ -204,13 +265,21 @@ impl Vaultwalker {
 }
 
 fn main() {
-    let mut root = args().nth(1).expect("A root path is required");
+    let args = Args::parse();
+
+    let mut root = args.root_path;
+
+    // let mut root = args().nth(1).expect("A root path is required");
     if !root.ends_with('/') {
         root += "/";
     }
 
-    let host = std::env::var("VAULT_ADDR").unwrap();
-    let token = read_to_string(home_dir().unwrap().join(".vault-token")).unwrap();
+    let host = args
+        .host
+        .unwrap_or_else(|| std::env::var("VAULT_ADDR").unwrap());
+    let token = args
+        .token
+        .unwrap_or_else(|| read_to_string(home_dir().unwrap().join(".vault-token")).unwrap());
 
     let mut vaultwalker = Vaultwalker::new(host, token, root);
 
@@ -221,6 +290,5 @@ fn main() {
     .expect("Error setting Ctrl-C handler");
 
     vaultwalker.setup();
-    vaultwalker.print();
     vaultwalker.input_loop();
 }

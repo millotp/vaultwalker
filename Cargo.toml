@@ -27,3 +27,5 @@ console = "0.15.7"
 ctrlc = "3.4.0"
 home = "0.5.5"
 termion = "2.0.1"
+clap = { version = "4.3.11", features = ["derive"] }
+clipboard = "0.5.0"
