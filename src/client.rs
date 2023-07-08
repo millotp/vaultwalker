@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::str::FromStr;
 
 use reqwest::blocking::Client;
@@ -34,6 +35,7 @@ pub struct VaultClient {
     client: Client,
     vault_addr: Url,
     token: String,
+    cache: HashMap<String, String>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -48,10 +50,20 @@ impl VaultClient {
             client,
             vault_addr: addr.into_url()?,
             token: token.into(),
+            cache: HashMap::new(),
         })
     }
 
-    fn read<T: DeserializeOwned>(&self, method: Method, path: &str) -> Result<VaultResponse<T>> {
+    fn read<T: DeserializeOwned>(
+        &mut self,
+        method: Method,
+        path: &str,
+    ) -> Result<VaultResponse<T>> {
+        let cache_key = method.to_string() + path;
+        if let Some(cache) = self.cache.get(&cache_key) {
+            return Ok(serde_json::from_str(cache)?);
+        }
+
         let res = self
             .client
             .request(method, self.vault_addr.join(path)?)
@@ -60,7 +72,11 @@ impl VaultClient {
             .send()?;
 
         if res.status().is_success() {
-            Ok(serde_json::from_reader(res)?)
+            let body = res.text().unwrap();
+            // cache the response
+            self.cache.insert(cache_key, body.clone());
+
+            Ok(serde_json::from_str(&body)?)
         } else {
             let error_msg = res
                 .text()
@@ -72,7 +88,7 @@ impl VaultClient {
         }
     }
 
-    pub fn get_secret<T: DeserializeOwned + std::fmt::Debug>(&self, path: &str) -> Result<T> {
+    pub fn get_secret<T: DeserializeOwned + std::fmt::Debug>(&mut self, path: &str) -> Result<T> {
         let res = self.read::<T>(Method::GET, &format!("v1/{}", path))?;
         match res.data {
             Some(data) => Ok(data),
@@ -83,7 +99,7 @@ impl VaultClient {
         }
     }
 
-    pub fn list_secrets(&self, path: &str) -> Result<ListResponse> {
+    pub fn list_secrets(&mut self, path: &str) -> Result<ListResponse> {
         let res = self.read(Method::from_str("LIST").unwrap(), &format!("v1/{}", path))?;
         match res.data {
             Some(data) => Ok(data),
@@ -92,5 +108,9 @@ impl VaultClient {
                 res
             ))),
         }
+    }
+
+    pub fn clear_cache(&mut self) {
+        self.cache.clear();
     }
 }

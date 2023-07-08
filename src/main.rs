@@ -92,6 +92,7 @@ impl Vaultwalker {
         self.term.hide_cursor().unwrap();
         self.term.clear_screen().unwrap();
         self.update_list();
+        self.screen.flush().unwrap();
     }
 
     fn update_list(&mut self) {
@@ -111,7 +112,7 @@ impl Vaultwalker {
         self.selected_secret = Some(res);
     }
 
-    fn print(&mut self) {
+    fn print(&self) {
         let prefix_len = self.path.len() + 1;
         for (i, item) in self.current_list.iter().enumerate() {
             let mut line = String::new();
@@ -139,28 +140,23 @@ impl Vaultwalker {
 
             self.term.write_line(&line).unwrap();
         }
-
-        self.screen.flush().unwrap();
     }
 
     fn input_loop(&mut self) {
         loop {
+            let mut needs_refresh = false;
             match self.term.read_key().unwrap() {
                 Key::ArrowDown | Key::Char('j') => {
                     if self.selected_item < self.current_list.len() - 1 {
                         self.selected_item += 1;
                     }
-                    self.update_selected_secret();
-                    self.term.clear_last_lines(self.current_list.len()).unwrap();
-                    self.print();
+                    needs_refresh = true;
                 }
                 Key::ArrowUp | Key::Char('k') => {
                     if self.selected_item > 0 {
                         self.selected_item -= 1;
                     }
-                    self.update_selected_secret();
-                    self.term.clear_last_lines(self.current_list.len()).unwrap();
-                    self.print();
+                    needs_refresh = true;
                 }
                 Key::ArrowRight | Key::Char('l') => {
                     if self.path.entries.len() > 32 {
@@ -171,18 +167,14 @@ impl Vaultwalker {
                         continue;
                     }
                     self.path.entries.push(entry);
-                    let len_before = self.current_list.len();
                     self.update_list();
                     self.selected_item = self.selected_item.min(self.current_list.len() - 1);
-                    self.update_selected_secret();
-                    self.term.clear_last_lines(len_before).unwrap();
-                    self.print();
+                    needs_refresh = true;
                 }
                 Key::ArrowLeft | Key::Char('h') => {
                     if self.path.entries.len() < self.root_len + 1 {
                         continue;
                     }
-                    let len_before = self.current_list.len();
                     let last = self.path.entries.pop().unwrap();
                     self.update_list();
                     self.selected_item = self
@@ -190,15 +182,22 @@ impl Vaultwalker {
                         .iter()
                         .position(|x| x.name == last.name)
                         .unwrap();
-                    self.update_selected_secret();
-                    self.term.clear_last_lines(len_before).unwrap();
-                    self.print();
+                    needs_refresh = true;
+                }
+                Key::Char('c') => {
+                    self.client.clear_cache();
                 }
                 Key::Escape | Key::Char('q') => {
                     self.term.show_cursor().unwrap();
                     break;
                 }
                 _ => (),
+            }
+
+            if needs_refresh {
+                self.update_selected_secret();
+                self.term.clear_screen().unwrap();
+                self.print();
             }
         }
     }
@@ -214,6 +213,12 @@ fn main() {
     let token = read_to_string(home_dir().unwrap().join(".vault-token")).unwrap();
 
     let mut vaultwalker = Vaultwalker::new(host, token, root);
+
+    ctrlc::set_handler(move || {
+        Term::stdout().show_cursor().unwrap();
+        std::process::exit(0);
+    })
+    .expect("Error setting Ctrl-C handler");
 
     vaultwalker.setup();
     vaultwalker.print();
