@@ -1,11 +1,9 @@
-use std::collections::HashMap;
-use std::str::FromStr;
+use std::{collections::HashMap, time::Duration};
 
-use reqwest::blocking::Client;
-use reqwest::{IntoUrl, Method, Url};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_derive::{Deserialize, Serialize};
+use ureq::{Agent, AgentBuilder};
 
 use crate::error::{Error, Result};
 
@@ -33,8 +31,8 @@ pub struct ListResponse {
 }
 
 pub struct VaultClient {
-    client: Client,
-    vault_addr: Url,
+    client: Agent,
+    vault_addr: String,
     token: String,
     cache: HashMap<String, String>,
 }
@@ -45,19 +43,22 @@ pub struct VaultSecret {
 }
 
 impl VaultClient {
-    pub fn new<U: IntoUrl, T: Into<String>>(addr: U, token: T) -> Result<VaultClient> {
-        let client = Client::new();
-        Ok(VaultClient {
+    pub fn new(addr: &str, token: &str) -> VaultClient {
+        let client = AgentBuilder::new()
+            .timeout_read(Duration::from_secs(5))
+            .timeout_write(Duration::from_secs(5))
+            .build();
+        VaultClient {
             client,
-            vault_addr: addr.into_url()?,
+            vault_addr: addr.to_string(),
             token: token.into(),
             cache: HashMap::new(),
-        })
+        }
     }
 
     fn read<T: DeserializeOwned>(
         &mut self,
-        method: Method,
+        method: &str,
         path: &str,
         no_cache: bool,
     ) -> Result<VaultResponse<T>> {
@@ -68,58 +69,43 @@ impl VaultClient {
             }
         }
 
-        let res = self
+        match self
             .client
-            .request(method, self.vault_addr.join(path)?)
-            .header("X-Vault-Token", self.token.clone())
-            .header("Content-Type", "application/json")
-            .send()?;
+            .request(method, &format!("{}/{}", self.vault_addr, path))
+            .set("X-Vault-Token", &self.token)
+            .set("Content-Type", "application/json")
+            .call()
+        {
+            Ok(res) => {
+                let res = res.into_string()?;
+                self.cache.insert(cache_key, res.clone());
 
-        if res.status().is_success() {
-            let body = res.text().unwrap();
-            // cache the response
-            self.cache.insert(cache_key, body.clone());
-
-            Ok(serde_json::from_str(&body)?)
-        } else {
-            let error_msg = res
-                .text()
-                .unwrap_or("Could not read vault response.".to_string());
-            Err(Error::Vault(format!(
-                "Vault request failed `{}`",
-                error_msg
-            )))
+                Ok(serde_json::from_str(&res)?)
+            }
+            Err(err) => Err(Error::Ureq(Box::new(err))),
         }
     }
 
     fn write<TBody: Serialize>(
         &mut self,
-        method: Method,
+        method: &str,
         path: &str,
         body: Option<TBody>,
     ) -> Result<()> {
-        let mut query = self
+        let query = self
             .client
-            .request(method, self.vault_addr.join(path)?)
-            .header("X-Vault-Token", self.token.clone())
-            .header("Content-Type", "application/json");
+            .request(method, &format!("{}/{}", self.vault_addr, path))
+            .set("X-Vault-Token", &self.token)
+            .set("Content-Type", "application/json");
 
-        if let Some(body) = body {
-            query = query.body(serde_json::to_string(&body)?);
-        }
+        let res = match body {
+            Some(body) => query.send_string(&serde_json::to_string(&body)?),
+            None => query.call(),
+        };
 
-        let res = query.send()?;
-
-        if res.status().is_success() {
-            Ok(())
-        } else {
-            let error_msg = res
-                .text()
-                .unwrap_or("Could not read vault response.".to_string());
-            Err(Error::Vault(format!(
-                "Vault request failed `{}`",
-                error_msg
-            )))
+        match res {
+            Ok(_) => Ok(()),
+            Err(err) => Err(Error::Ureq(Box::new(err))),
         }
     }
 
@@ -128,7 +114,7 @@ impl VaultClient {
         path: &str,
         no_cache: bool,
     ) -> Result<T> {
-        let res = self.read::<T>(Method::GET, &format!("v1/{}", path), no_cache)?;
+        let res = self.read::<T>("GET", &format!("v1/{}", path), no_cache)?;
         match res.data {
             Some(data) => Ok(data),
             None => Err(Error::Vault(format!(
@@ -139,11 +125,7 @@ impl VaultClient {
     }
 
     pub fn list_secrets(&mut self, path: &str, no_cache: bool) -> Result<ListResponse> {
-        let res = self.read(
-            Method::from_str("LIST").unwrap(),
-            &format!("v1/{}", path),
-            no_cache,
-        )?;
+        let res = self.read("LIST", &format!("v1/{}", path), no_cache)?;
         match res.data {
             Some(data) => Ok(data),
             None => Err(Error::Vault(format!(
@@ -155,7 +137,7 @@ impl VaultClient {
 
     pub fn write_secret(&mut self, path: &str, secret: &str) -> Result<()> {
         self.write(
-            Method::POST,
+            "POST",
             &format!("v1/{}", path),
             Some(VaultSecret {
                 secret: Some(secret.to_string()),
@@ -164,7 +146,7 @@ impl VaultClient {
     }
 
     pub fn delete_secret(&mut self, path: &str) -> Result<()> {
-        self.write::<()>(Method::DELETE, &format!("v1/{}", path), None)
+        self.write::<()>("DELETE", &format!("v1/{}", path), None)
     }
 
     pub fn clear_cache(&mut self) {

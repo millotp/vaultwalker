@@ -101,7 +101,7 @@ enum Mode {
 
 struct Vaultwalker {
     client: VaultClient,
-    screen: AlternateScreen<Stdout>,
+    screen: Option<AlternateScreen<Stdout>>,
     term: Term,
     clipboard: ClipboardContext,
     mode: Mode,
@@ -116,11 +116,15 @@ struct Vaultwalker {
 }
 
 impl Vaultwalker {
-    fn new(host: String, token: String, root: String) -> Self {
+    fn new(host: String, token: String, root: String, use_alternate_screen: bool) -> Self {
         let path = VaultPath::decode(&root);
         Self {
-            client: VaultClient::new(host, token).unwrap(),
-            screen: stdout().into_alternate_screen().unwrap(),
+            client: VaultClient::new(&host, &token),
+            screen: if use_alternate_screen {
+                Some(stdout().into_alternate_screen().unwrap())
+            } else {
+                None
+            },
             term: Term::stdout(),
             clipboard: ClipboardProvider::new().unwrap(),
             mode: Mode::Navigation,
@@ -139,7 +143,9 @@ impl Vaultwalker {
         self.update_list(true);
         self.print();
         self.print_controls();
-        self.screen.flush().unwrap();
+        if let Some(screen) = self.screen.as_mut() {
+            screen.flush().unwrap();
+        }
     }
 
     fn update_list(&mut self, no_cache: bool) {
@@ -467,7 +473,7 @@ fn main() {
         .token
         .unwrap_or_else(|| read_to_string(home_dir().unwrap().join(".vault-token")).unwrap());
 
-    let mut vaultwalker = Vaultwalker::new(host, token, root);
+    let mut vaultwalker = Vaultwalker::new(host, token, root, false);
 
     ctrlc::set_handler(move || {
         Term::stdout().show_cursor().unwrap();

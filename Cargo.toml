@@ -11,16 +11,9 @@ keywords = ["vault", "hashicorp", "cli"]
 categories = ["command-line-utilities"]
 edition = "2021"
 
-[features]
-default = ["native-tls"]
-native-tls = ["reqwest/native-tls"]
-rustls-tls = ["reqwest/rustls-tls"]
-
 [dependencies]
-reqwest = { version = "0.11.18", default-features = false, features = ["blocking"] }
 quick-error = "2.0.1"
 serde_json = "1.0.100"
-url = "2.4.0"
 serde = "1.0.171"
 serde_derive = "1.0.171"
 console = "0.15.7"
@@ -29,3 +22,4 @@ home = "0.5.5"
 termion = "2.0.1"
 clap = { version = "4.3.11", features = ["derive"] }
 clipboard = "0.5.0"
+ureq = "2.7.1"
