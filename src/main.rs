@@ -410,9 +410,10 @@ impl Vaultwalker {
 
     fn handle_deleting_key(&mut self) {
         self.term.show_cursor().unwrap();
-        self.print_message(
-            "Are you sure you want to delete this key? (only 'yes' will be accepted): ",
-        );
+        self.print_message(&format!(
+            "Are you sure you want to delete the key '{}'? (only 'yes' will be accepted): ",
+            self.current_list[self.selected_item].name
+        ));
         let answer = self.term.read_line().unwrap();
         if answer == "yes" {
             let mut path = self.path.join();
