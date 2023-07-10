@@ -19,6 +19,11 @@ To see all available options use `vaultwalker -h`.
 
 Navigate with the arrow to select any credentials, then use `P` to copy the path to the secret, or `S` to copy the secret itself.
 
+To add a new key:
+- navigate to the correct path and press `+`
+- write the name of your key, press `Enter`
+- write the value of the secret, press `Enter` again
+
 ## Development
 
 Run with `cargo run secret/my_company`.
