@@ -159,6 +159,11 @@ impl Vaultwalker {
         self.selected_secret = Some(res);
     }
 
+    fn refresh_all(&mut self) {
+        self.update_list(true);
+        self.update_selected_secret(true);
+    }
+
     fn selected_line_for_current_mode(&self, item: &VaultEntry) -> String {
         match self.mode {
             Mode::Navigation | Mode::DeletingKey => {
@@ -383,8 +388,7 @@ impl Vaultwalker {
 
         let res = self.client.write_secret(&path, &secret);
 
-        self.update_list(true);
-        self.update_selected_secret(true);
+        self.refresh_all();
 
         self.term.hide_cursor().unwrap();
         self.print();
@@ -420,7 +424,7 @@ impl Vaultwalker {
                 self.term.read_key().unwrap();
             }
 
-            self.update_list(true);
+            self.refresh_all();
         }
 
         self.mode = Mode::Navigation;
