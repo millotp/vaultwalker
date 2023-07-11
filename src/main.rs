@@ -111,7 +111,7 @@ struct Vaultwalker {
     current_list: Vec<VaultEntry>,
     selected_item: usize,
     selected_secret: Option<VaultSecret>,
-
+    displayed_message: String,
     buffered_key: String,
 }
 
@@ -134,6 +134,7 @@ impl Vaultwalker {
             current_list: vec![],
             selected_item: 0,
             selected_secret: None,
+            displayed_message: String::new(),
             buffered_key: String::new(),
         }
     }
@@ -252,7 +253,13 @@ impl Vaultwalker {
     }
 
     fn print_message(&mut self, message: &str) {
+        if self.displayed_message == message {
+            return;
+        }
+
+        self.displayed_message = message.to_owned();
         self.term.move_cursor_down(10000).unwrap();
+        self.term.clear_line().unwrap();
         self.term
             .write_all(style(message).black().on_white().to_string().as_bytes())
             .unwrap();
@@ -473,7 +480,7 @@ fn main() {
         .token
         .unwrap_or_else(|| read_to_string(home_dir().unwrap().join(".vault-token")).unwrap());
 
-    let mut vaultwalker = Vaultwalker::new(host, token, root, false);
+    let mut vaultwalker = Vaultwalker::new(host, token, root, true);
 
     ctrlc::set_handler(move || {
         Term::stdout().show_cursor().unwrap();
