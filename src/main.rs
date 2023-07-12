@@ -6,14 +6,13 @@ use std::{
     io::{stdout, Stdout, Write},
 };
 
-use clap::Parser;
-
 extern crate clipboard;
 
 use clipboard::{ClipboardContext, ClipboardProvider};
 
 use client::VaultSecret;
 use console::{style, Key, Term};
+use gumdrop::Options;
 use home::home_dir;
 use termion::screen::{AlternateScreen, IntoAlternateScreen};
 
@@ -67,21 +66,18 @@ impl VaultPath {
     }
 }
 
-#[derive(Parser, Debug)]
-#[command(author, version, about)]
+#[derive(Options)]
 struct Args {
+    #[options(help_flag)]
+    help: bool,
+
+    #[options(free, required, help = "Path to the root of the vault")]
     root_path: String,
-    #[arg(
-        short = 'H',
-        long,
-        help = "URL of the vault server, defaults to $VAULT_ADDR"
-    )]
+
+    #[options(help = "URL of the vault server, defaults to $VAULT_ADDR", short = "H")]
     host: Option<String>,
-    #[arg(
-        short,
-        long,
-        help = "Vault token, default to the value in ~/.vault-token"
-    )]
+
+    #[options(help = "Vault token, default to the value in ~/.vault-token")]
     token: Option<String>,
 }
 
@@ -466,17 +462,17 @@ impl Vaultwalker {
 }
 
 fn main() {
-    let args = Args::parse();
+    let opts = Args::parse_args_default_or_exit();
 
-    let mut root = args.root_path;
+    let mut root = opts.root_path;
     if !root.ends_with('/') {
         root += "/";
     }
 
-    let host = args
+    let host = opts
         .host
         .unwrap_or_else(|| std::env::var("VAULT_ADDR").unwrap());
-    let token = args
+    let token = opts
         .token
         .unwrap_or_else(|| read_to_string(home_dir().unwrap().join(".vault-token")).unwrap());
 
