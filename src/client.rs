@@ -30,6 +30,12 @@ pub struct ListResponse {
     pub keys: Vec<String>,
 }
 
+#[derive(PartialEq)]
+pub enum FromCache {
+    Yes,
+    No,
+}
+
 pub struct VaultClient {
     client: Agent,
     vault_addr: String,
@@ -60,10 +66,10 @@ impl VaultClient {
         &mut self,
         method: &str,
         path: &str,
-        no_cache: bool,
+        cache: FromCache,
     ) -> Result<VaultResponse<T>> {
         let cache_key = method.to_string() + path;
-        if !no_cache {
+        if cache == FromCache::Yes {
             if let Some(cache) = self.cache.get(&cache_key) {
                 return Ok(serde_json::from_str(cache)?);
             }
@@ -112,9 +118,9 @@ impl VaultClient {
     pub fn get_secret<T: DeserializeOwned + std::fmt::Debug>(
         &mut self,
         path: &str,
-        no_cache: bool,
+        cache: FromCache,
     ) -> Result<T> {
-        let res = self.read::<T>("GET", &format!("v1/{}", path), no_cache)?;
+        let res = self.read::<T>("GET", &format!("v1/{}", path), cache)?;
         match res.data {
             Some(data) => Ok(data),
             None => Err(Error::Vault(format!(
@@ -124,8 +130,8 @@ impl VaultClient {
         }
     }
 
-    pub fn list_secrets(&mut self, path: &str, no_cache: bool) -> Result<ListResponse> {
-        let res = self.read("LIST", &format!("v1/{}", path), no_cache)?;
+    pub fn list_secrets(&mut self, path: &str, cache: FromCache) -> Result<ListResponse> {
+        let res = self.read("LIST", &format!("v1/{}", path), cache)?;
         match res.data {
             Some(data) => Ok(data),
             None => Err(Error::Vault(format!(
