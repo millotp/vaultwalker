@@ -19,6 +19,7 @@ use termion::{
     clear::{All, CurrentLine},
     cursor::{Goto, Hide, HideCursor, Show},
     screen::{IntoAlternateScreen, ToMainScreen},
+    terminal_size,
 };
 
 use crate::client::VaultClient;
@@ -96,6 +97,7 @@ struct Vaultwalker {
     root_len: usize,
     current_list: Vec<VaultEntry>,
     selected_item: usize,
+    scroll: usize,
     selected_secret: Option<VaultSecret>,
     displayed_message: Option<String>,
     buffered_key: String,
@@ -119,6 +121,7 @@ impl Vaultwalker {
             path,
             current_list: vec![],
             selected_item: 0,
+            scroll: 0,
             selected_secret: None,
             displayed_message: None,
             buffered_key: String::new(),
@@ -194,6 +197,8 @@ impl Vaultwalker {
 
     fn print(&mut self) -> Result<()> {
         write!(self.screen, "{}{}", All, Goto(1, 1))?;
+        let (_, height) = terminal_size()?;
+
         let mut extended_item = Vec::new();
         match self.mode {
             Mode::Navigation | Mode::DeletingKey => (),
@@ -207,6 +212,20 @@ impl Vaultwalker {
             }),
         }
 
+        if self.selected_item <= self.scroll {
+            self.scroll = self.selected_item - if self.selected_item == 0 { 0 } else { 1 };
+        }
+
+        if self.selected_item - self.scroll >= height as usize - 3 {
+            self.scroll = self.selected_item + 3
+                - height as usize
+                - if self.selected_item == self.current_list.len() + extended_item.len() - 1 {
+                    1
+                } else {
+                    0
+                };
+        }
+
         let mut len_selected = 0;
         let prefix_len = self.path.len() + 1;
         for (i, item) in self
@@ -214,9 +233,11 @@ impl Vaultwalker {
             .iter()
             .chain(extended_item.iter())
             .enumerate()
+            .skip(self.scroll)
+            .take(height as usize - 1)
         {
             let mut line = String::new();
-            if i == 0 {
+            if i == self.scroll {
                 line.push_str(&format!("{} ", &style(self.path.join()).bold().bright()));
             } else {
                 line.push_str(&format!("{:prefix$}", "", prefix = prefix_len));
@@ -245,7 +266,10 @@ impl Vaultwalker {
                 write!(
                     self.screen,
                     "{}",
-                    Goto(len_selected as u16 + 1, self.selected_item as u16 + 1)
+                    Goto(
+                        len_selected as u16 + 1,
+                        self.selected_item as u16 + 1 - self.scroll as u16
+                    )
                 )?;
             }
             _ => (),
