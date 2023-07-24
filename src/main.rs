@@ -3,7 +3,7 @@ mod error;
 
 use std::{
     fs::read_to_string,
-    io::{stdout, Stdout, Write},
+    io::{stdout, Write},
 };
 
 extern crate clipboard;
@@ -15,7 +15,11 @@ use console::{style, Key, Term};
 use error::{Error, Result};
 use gumdrop::Options;
 use home::home_dir;
-use termion::screen::{AlternateScreen, IntoAlternateScreen, ToMainScreen};
+use termion::{
+    clear::{All, CurrentLine},
+    cursor::{Goto, Hide, HideCursor, Show},
+    screen::{IntoAlternateScreen, ToMainScreen},
+};
 
 use crate::client::VaultClient;
 
@@ -83,7 +87,7 @@ enum Mode {
 
 struct Vaultwalker {
     client: VaultClient,
-    screen: Option<AlternateScreen<Stdout>>,
+    screen: Box<dyn Write>,
     term: Term,
     clipboard: ClipboardContext,
     mode: Mode,
@@ -93,7 +97,7 @@ struct Vaultwalker {
     current_list: Vec<VaultEntry>,
     selected_item: usize,
     selected_secret: Option<VaultSecret>,
-    displayed_message: String,
+    displayed_message: Option<String>,
     buffered_key: String,
 }
 
@@ -103,9 +107,9 @@ impl Vaultwalker {
         let vw = Self {
             client: VaultClient::new(&host, &token),
             screen: if use_alternate_screen {
-                Some(stdout().into_alternate_screen()?)
+                Box::new(HideCursor::from(stdout().into_alternate_screen()?))
             } else {
-                None
+                Box::new(HideCursor::from(stdout()))
             },
             term: Term::stdout(),
             clipboard: ClipboardProvider::new().unwrap(),
@@ -116,7 +120,7 @@ impl Vaultwalker {
             current_list: vec![],
             selected_item: 0,
             selected_secret: None,
-            displayed_message: String::new(),
+            displayed_message: None,
             buffered_key: String::new(),
         };
 
@@ -124,13 +128,11 @@ impl Vaultwalker {
     }
 
     fn setup(&mut self) -> Result<()> {
-        self.term.hide_cursor()?;
+        write!(self.screen, "{}", Hide)?;
         self.update_list(FromCache::No)?;
         self.print()?;
         self.print_controls()?;
-        if let Some(screen) = self.screen.as_mut() {
-            screen.flush()?;
-        }
+        self.screen.flush()?;
 
         Ok(())
     }
@@ -191,8 +193,7 @@ impl Vaultwalker {
     }
 
     fn print(&mut self) -> Result<()> {
-        self.term.clear_screen()?;
-
+        write!(self.screen, "{}{}", All, Goto(1, 1))?;
         let mut extended_item = Vec::new();
         match self.mode {
             Mode::Navigation | Mode::DeletingKey => (),
@@ -236,29 +237,43 @@ impl Vaultwalker {
                 line.push('\n')
             }
 
-            self.term.write_all(line.as_bytes())?;
+            self.screen.write_all(line.as_bytes())?;
         }
 
         match self.mode {
             Mode::TypingKey | Mode::TypingSecret(_) => {
-                self.term.move_cursor_to(len_selected, self.selected_item)?
+                write!(
+                    self.screen,
+                    "{}",
+                    Goto(len_selected as u16 + 1, self.selected_item as u16 + 1)
+                )?;
             }
             _ => (),
         };
+
+        self.screen.flush()?;
 
         Ok(())
     }
 
     fn print_message(&mut self, message: &str) -> Result<()> {
-        if self.displayed_message == message {
+        if self
+            .displayed_message
+            .as_ref()
+            .is_some_and(|m| m == message)
+        {
             return Ok(());
         }
 
-        self.displayed_message = message.to_owned();
-        self.term.move_cursor_down(10000)?;
-        self.term.clear_line()?;
-        self.term
-            .write_all(style(message).black().on_white().to_string().as_bytes())?;
+        self.displayed_message = Some(message.to_owned());
+        write!(
+            self.screen,
+            "{}{}{}",
+            Goto(1, 10000),
+            CurrentLine,
+            style(message).black().on_white()
+        )?;
+        self.screen.flush()?;
 
         Ok(())
     }
@@ -340,7 +355,7 @@ impl Vaultwalker {
             }
             Key::Char('a') => {
                 self.selected_item = self.current_list.len();
-                self.term.show_cursor()?;
+                write!(self.screen, "{}", Show)?;
                 self.mode = Mode::TypingKey;
 
                 needs_refresh = true;
@@ -351,7 +366,7 @@ impl Vaultwalker {
                     return Ok(());
                 }
 
-                self.term.show_cursor()?;
+                write!(self.screen, "{}", Show)?;
                 self.mode = Mode::TypingSecret(SecretEdition::Update);
 
                 needs_refresh = true;
@@ -371,6 +386,7 @@ impl Vaultwalker {
             }
 
             self.print()?;
+            self.displayed_message = None;
         }
 
         Ok(())
@@ -404,7 +420,7 @@ impl Vaultwalker {
 
         self.refresh_all()?;
 
-        self.term.hide_cursor()?;
+        write!(self.screen, "{}", Hide)?;
         self.print()?;
         if let Err(err) = res {
             self.print_message(&err.to_string())?;
@@ -425,7 +441,7 @@ impl Vaultwalker {
     }
 
     fn handle_deleting_key(&mut self) -> Result<()> {
-        self.term.show_cursor()?;
+        write!(self.screen, "{}", Show)?;
         self.print_message(&format!(
             "Are you sure you want to delete the key '{}'? (only 'yes' will be accepted): ",
             self.current_list[self.selected_item].name
@@ -446,7 +462,7 @@ impl Vaultwalker {
 
         self.mode = Mode::Navigation;
 
-        self.term.hide_cursor()?;
+        write!(self.screen, "{}", Hide)?;
 
         self.print()
     }
@@ -461,8 +477,6 @@ impl Vaultwalker {
             }?;
 
             if self.quit_requested {
-                self.term.show_cursor()?;
-
                 return Ok(());
             }
         }
@@ -484,6 +498,13 @@ struct Args {
     token: Option<String>,
 }
 
+fn run(host: String, token: String, root: String) -> Result<()> {
+    let mut vaultwalker = Vaultwalker::new(host, token, root, true)?;
+
+    vaultwalker.setup()?;
+    vaultwalker.input_loop()
+}
+
 fn main() {
     let opts = Args::parse_args_default_or_exit();
 
@@ -499,20 +520,14 @@ fn main() {
         .token
         .unwrap_or_else(|| read_to_string(home_dir().unwrap().join(".vault-token")).unwrap());
 
-    let mut vaultwalker = Vaultwalker::new(host, token, root, false).unwrap();
-
     ctrlc::set_handler(|| {
-        Term::stdout().show_cursor().unwrap();
+        write!(stdout(), "{}{}", ToMainScreen, Show).unwrap();
         std::process::exit(0);
     })
     .expect("Error setting Ctrl-C handler");
 
-    let exit = |err: Error| {
-        print!("{}{}", ToMainScreen, err);
-        Term::stdout().show_cursor().unwrap();
+    run(host, token, root).unwrap_or_else(|err: Error| {
+        println!("{}", err);
         std::process::exit(0);
-    };
-
-    vaultwalker.setup().unwrap_or_else(exit);
-    vaultwalker.input_loop().unwrap_or_else(exit);
+    });
 }
