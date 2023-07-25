@@ -72,6 +72,14 @@ impl VaultPath {
     }
 }
 
+fn shorten_string(s: String, max_len: usize) -> String {
+    if max_len < s.len() {
+        format!("{}...", &s[0..max_len])
+    } else {
+        s
+    }
+}
+
 #[derive(PartialEq, Copy, Clone)]
 enum SecretEdition {
     Insert,
@@ -169,14 +177,29 @@ impl Vaultwalker {
         Ok(())
     }
 
-    fn selected_line_for_current_mode(&self, item: &VaultEntry) -> Result<String> {
+    fn selected_line_for_current_mode(
+        &self,
+        item: &VaultEntry,
+        max_width: usize,
+    ) -> Result<String> {
         match self.mode {
             Mode::Navigation | Mode::DeletingKey => {
                 let mut line = format!("> {}{}", item.name, if item.is_dir { "/" } else { "" });
 
+                let remaining = if max_width < line.len() + 7 {
+                    0
+                } else {
+                    max_width - line.len() - 7
+                };
+
                 if let Some(secret) = self.selected_secret.as_ref() {
                     if let Some(secret) = secret.secret.as_ref() {
-                        line.push_str(&format!(" -> {}", &style(&secret).bold().bright()));
+                        line.push_str(&format!(
+                            " -> {}",
+                            &style(shorten_string(secret.clone(), remaining))
+                                .bold()
+                                .bright()
+                        ));
                     }
                 }
 
@@ -197,7 +220,7 @@ impl Vaultwalker {
 
     fn print(&mut self) -> Result<()> {
         write!(self.screen, "{}{}", All, Goto(1, 1))?;
-        let (_, height) = terminal_size()?;
+        let (width, height) = terminal_size()?;
 
         let mut extended_item = Vec::new();
         match self.mode {
@@ -244,7 +267,10 @@ impl Vaultwalker {
             }
 
             if i == self.selected_item {
-                line.push_str(&self.selected_line_for_current_mode(item)?);
+                line.push_str(&self.selected_line_for_current_mode(
+                    item,
+                    (width as i32 - line.len() as i32).max(3) as usize,
+                )?);
                 len_selected = line.len();
             } else {
                 line.push_str(&format!(
@@ -334,6 +360,7 @@ impl Vaultwalker {
                 self.path.entries.push(entry);
                 self.update_list(FromCache::Yes)?;
                 self.selected_item = self.selected_item.min(self.current_list.len() - 1);
+                self.scroll = 0;
                 needs_refresh = true;
             }
             Key::ArrowLeft | Key::Char('h') => {
@@ -347,6 +374,7 @@ impl Vaultwalker {
                     .iter()
                     .position(|x| x.name == last.name)
                     .unwrap();
+                self.scroll = 0;
                 needs_refresh = true;
             }
             Key::Char('c') => {
