@@ -146,7 +146,7 @@ jobs:
   publish:
     name: Publish to crates.io
     runs-on: macos-latest
-    needs: build-release
+    needs: ['create-release', 'build-release']
     environment: crates.io
     steps:
       - uses: actions/checkout@v4
