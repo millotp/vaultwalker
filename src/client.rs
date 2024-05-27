@@ -1,4 +1,7 @@
-use std::{collections::HashMap, time::Duration};
+use std::{
+    collections::{BTreeMap, HashMap},
+    time::Duration,
+};
 
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -45,7 +48,18 @@ pub struct VaultClient {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct VaultSecret {
-    pub secret: Option<String>,
+    secret: Option<String>,
+    #[serde(flatten)]
+    other: BTreeMap<String, serde_json::Value>,
+}
+
+impl From<&VaultSecret> for String {
+    fn from(val: &VaultSecret) -> Self {
+        match &val.secret {
+            Some(secret) => secret.to_string(),
+            None => serde_json::to_string(&val.other).unwrap(),
+        }
+    }
 }
 
 impl VaultClient {
@@ -147,6 +161,7 @@ impl VaultClient {
             &format!("v1/{}", path),
             Some(VaultSecret {
                 secret: Some(secret.to_string()),
+                other: BTreeMap::new(),
             }),
         )
     }

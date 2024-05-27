@@ -76,7 +76,8 @@ impl VaultPath {
     }
 }
 
-fn shorten_string(s: String, max_len: usize) -> String {
+fn shorten_string(s: impl Into<String>, max_len: usize) -> String {
+    let s = s.into();
     if max_len < s.len() {
         format!("{}...", &s[0..max_len])
     } else {
@@ -94,7 +95,7 @@ fn read_line() -> Result<String> {
         line.pop();
     }
 
-    return Ok(line);
+    Ok(line)
 }
 
 #[derive(PartialEq, Copy, Clone)]
@@ -202,12 +203,7 @@ impl Vaultwalker {
                 };
 
                 if let Some(secret) = self.selected_secret.as_ref() {
-                    if let Some(secret) = secret.secret.as_ref() {
-                        line.push_str(&format!(
-                            " -> {}",
-                            shorten_string(secret.clone(), remaining).bold()
-                        ));
-                    }
+                    line.push_str(&format!(" -> {}", shorten_string(secret, remaining).bold()));
                 }
 
                 Ok(line)
@@ -334,8 +330,8 @@ impl Vaultwalker {
 
     fn handle_navigation(&mut self) -> Result<()> {
         let mut needs_refresh = false;
-        match read()? {
-            Event::Key(event) => match event.code {
+        if let Event::Key(event) = read()? {
+            match event.code {
                 KeyCode::Down | KeyCode::Char('j') => {
                     if self.selected_item < self.current_list.len() - 1 {
                         self.selected_item += 1;
@@ -401,11 +397,9 @@ impl Vaultwalker {
                     }
 
                     if let Some(secret) = self.selected_secret.as_ref() {
-                        if let Some(secret) = secret.secret.as_ref() {
-                            self.clipboard.set_contents(secret.clone()).unwrap();
+                        self.clipboard.set_contents(secret.into()).unwrap();
 
-                            self.print_message("secret copied to clipboard")?;
-                        }
+                        self.print_message("secret copied to clipboard")?;
                     }
                 }
                 KeyCode::Char('a') => {
@@ -433,8 +427,7 @@ impl Vaultwalker {
                 }
                 KeyCode::Esc | KeyCode::Char('q') => self.quit_requested = true,
                 _ => (),
-            },
-            _ => (),
+            }
         }
 
         if needs_refresh {
