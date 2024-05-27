@@ -2,6 +2,7 @@ mod client;
 mod error;
 
 use std::{
+    fmt::{self},
     fs::read_to_string,
     io::{stdin, stdout},
 };
@@ -48,15 +49,21 @@ impl VaultEntry {
     }
 }
 
+impl fmt::Display for VaultEntry {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}{}", self.name, if self.is_dir { "/" } else { "" })
+    }
+}
+
 struct VaultPath {
     entries: Vec<VaultEntry>,
 }
 
 impl VaultPath {
     fn join(&self) -> String {
-        self.entries.iter().fold(String::new(), |acc, item| {
-            acc + &item.name + if item.is_dir { "/" } else { "" }
-        })
+        self.entries
+            .iter()
+            .fold(String::new(), |acc, item| format!("{}{}", acc, item))
     }
 
     fn len(&self) -> usize {
@@ -86,10 +93,12 @@ fn shorten_string(s: impl Into<String>, max_len: usize) -> String {
 }
 
 fn read_line() -> Result<String> {
+    execute!(stdout(), cursor::Show)?;
     disable_raw_mode()?;
     let mut line = String::new();
     stdin().read_line(&mut line)?;
     enable_raw_mode()?;
+    execute!(stdout(), cursor::Hide)?;
 
     while line.ends_with('\n') {
         line.pop();
@@ -194,7 +203,7 @@ impl Vaultwalker {
     ) -> Result<String> {
         match self.mode {
             Mode::Navigation | Mode::DeletingKey => {
-                let mut line = format!("> {}{}", item.name, if item.is_dir { "/" } else { "" });
+                let mut line = format!("> {}", item);
 
                 let remaining = if max_width < line.len() + 7 {
                     0
@@ -208,16 +217,8 @@ impl Vaultwalker {
 
                 Ok(line)
             }
-            Mode::TypingKey => Ok(format!(
-                "> {}{}",
-                item.name,
-                if item.is_dir { "/" } else { "" }
-            )),
-            Mode::TypingSecret(_) => Ok(format!(
-                "> {}{} -> ",
-                item.name,
-                if item.is_dir { "/" } else { "" }
-            )),
+            Mode::TypingKey => Ok(format!("> {}", item,)),
+            Mode::TypingSecret(_) => Ok(format!("> {} -> ", item)),
         }
     }
 
@@ -276,11 +277,7 @@ impl Vaultwalker {
                 )?);
                 len_selected = line.len();
             } else {
-                line.push_str(&format!(
-                    "  {}{}",
-                    item.name,
-                    if item.is_dir { "/" } else { "" }
-                ))
+                line.push_str(&format!("  {}", item))
             }
 
             execute!(stdout(), Print(line), cursor::MoveToNextLine(1))?;
@@ -316,7 +313,7 @@ impl Vaultwalker {
             stdout(),
             MoveTo(0, 10000),
             Clear(ClearType::CurrentLine),
-            Print(message.black().on_white()),
+            Print(format!(" {} ", message).black().on_white()),
         )?;
 
         Ok(())
@@ -324,7 +321,7 @@ impl Vaultwalker {
 
     fn print_controls(&mut self) -> Result<()> {
         self.print_message(
-            "navigate with arrows      P: copy path      S: copy secret      A: create secret      U: update secret      D: delete secret      Q: quit      C: clear cache",
+            "Navigate with arrows or HJKL      copy [P]ath      copy [S]ecret      [A]dd secret      [U]pdate secret      [D]elete secret      [Q]uit      [C]lear cache    [O]pen help",
         )
     }
 
@@ -383,6 +380,9 @@ impl Vaultwalker {
 
                     needs_refresh = true;
                 }
+                KeyCode::Char('o') => {
+                    self.print_controls()?;
+                }
                 KeyCode::Char('p') => {
                     let mut path = self.path.join();
                     path.push_str(&self.current_list[self.selected_item].name);
@@ -404,7 +404,6 @@ impl Vaultwalker {
                 }
                 KeyCode::Char('a') => {
                     self.selected_item = self.current_list.len();
-                    execute!(stdout(), cursor::Show)?;
                     self.mode = Mode::TypingKey;
 
                     needs_refresh = true;
@@ -415,7 +414,6 @@ impl Vaultwalker {
                         return Ok(());
                     }
 
-                    execute!(stdout(), cursor::Show)?;
                     self.mode = Mode::TypingSecret(SecretEdition::Update);
 
                     needs_refresh = true;
@@ -469,8 +467,6 @@ impl Vaultwalker {
         let res = self.client.write_secret(&path, &secret);
 
         self.refresh_all()?;
-
-        execute!(stdout(), cursor::Hide)?;
         self.print()?;
         if let Err(err) = res {
             self.print_message(&err.to_string())?;
@@ -491,12 +487,14 @@ impl Vaultwalker {
     }
 
     fn handle_deleting_key(&mut self) -> Result<()> {
-        execute!(stdout(), cursor::Show)?;
         self.print_message(&format!(
             "Are you sure you want to delete the key '{}'? (only 'yes' will be accepted): ",
             self.current_list[self.selected_item].name
         ))?;
+        execute!(stdout(), Print(" "))?;
+
         let answer = read_line()?;
+        let mut result_message = format!("received '{}', the key was not deleted", answer);
         if answer == "yes" {
             let mut path = self.path.join();
             path.push_str(&self.current_list[self.selected_item].name);
@@ -507,14 +505,18 @@ impl Vaultwalker {
                 read()?;
             }
 
+            if self.selected_item >= self.current_list.len() - 1 {
+                self.selected_item -= 1;
+            }
+
             self.refresh_all()?;
+
+            result_message = format!("deleted the key '{}'", path);
         }
 
         self.mode = Mode::Navigation;
-
-        execute!(stdout(), cursor::Hide)?;
-
-        self.print()
+        self.print()?;
+        self.print_message(&result_message)
     }
 
     fn input_loop(&mut self) -> Result<()> {
@@ -522,7 +524,7 @@ impl Vaultwalker {
             match self.mode {
                 Mode::Navigation => self.handle_navigation(),
                 Mode::TypingKey => self.handle_typing_key(),
-                Mode::TypingSecret(sm) => self.handle_typing_secret(sm),
+                Mode::TypingSecret(se) => self.handle_typing_secret(se),
                 Mode::DeletingKey => self.handle_deleting_key(),
             }?;
 
