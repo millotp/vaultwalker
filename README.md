@@ -10,19 +10,19 @@ A command line interface to browse and edit [Vault](https://www.vaultproject.io/
 
 If you have the vault cli already installed, you can simply use:
 ```sh
-vaultwalker secret/my_company
+vw secret/my_company
 ```
 
 By default it will fetch the vault server address in `$VAULT_ADDR` and the token in the file `~/.vault-token`.
 
 If you want to provide your own login you can use:
 ```sh
-vaultwalker --host <my_vault_server> --token <the vault token> secret/my_company
+vw --host <my_vault_server> --token <the vault token> secret/my_company
 ```
 
 To see all available options use:
 ```sh
-vaultwalker -h
+vw -h
 ```
 
 ## Features

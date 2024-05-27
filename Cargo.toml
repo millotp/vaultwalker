@@ -11,6 +11,10 @@ keywords = ["vault", "hashicorp", "cli"]
 categories = ["command-line-utilities"]
 edition = "2021"
 
+[[bin]]
+path = "src/main.rs"
+name = "vw"
+
 [dependencies]
 quick-error = "2.0.1"
 serde_json = "1.0.100"
