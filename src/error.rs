@@ -22,6 +22,10 @@ quick_error! {
         Vault(err: String) {
             display("vault error: {}", err)
         }
+        /// Application errors
+        Application(err: String) {
+            display("{}", err)
+        }
         /// IO errors
         Io(err: std::io::Error) {
             from()

@@ -14,7 +14,7 @@ use crossterm::{
     cursor::{self, MoveDown, MoveTo, MoveToNextLine},
     event::{read, Event, KeyCode, KeyModifiers},
     execute,
-    style::{Print, Stylize},
+    style::{Print, StyledContent, Stylize},
     terminal::{
         self, disable_raw_mode, enable_raw_mode, Clear, ClearType, EnterAlternateScreen,
         LeaveAlternateScreen,
@@ -107,7 +107,7 @@ fn read_line() -> Result<String> {
 }
 
 #[derive(PartialEq, Copy, Clone)]
-enum SecretEdition {
+enum EditMode {
     Insert,
     Update,
 }
@@ -115,8 +115,8 @@ enum SecretEdition {
 #[derive(PartialEq)]
 enum Mode {
     Navigation,
-    TypingKey,
-    TypingSecret(SecretEdition),
+    TypingKey(EditMode),
+    TypingSecret(EditMode),
     DeletingKey,
 }
 
@@ -168,6 +168,48 @@ impl Vaultwalker {
         Ok(())
     }
 
+    fn get_selected_path(&self) -> String {
+        let mut path = self.path.join();
+        path.push_str(&self.current_list[self.selected_item].name);
+
+        path
+    }
+
+    fn rename_key(&mut self, new_key: &str) -> Result<()> {
+        // check if the key already exists
+        self.update_list(FromCache::No)?;
+        if self.current_list.iter().any(|x| x.name == new_key) {
+            return Err(Error::Application(format!(
+                "the key '{}' already exists",
+                new_key
+            )));
+        }
+
+        // read the secret from the old key
+        self.update_selected_secret(FromCache::No)?;
+        let secret = self.selected_secret.as_ref().unwrap();
+
+        // write the secret to the new key
+        let new_path = format!("{}{}", self.path.join(), new_key);
+        self.client
+            .write_secret(&new_path, &<&VaultSecret as Into<String>>::into(secret))?;
+
+        // delete the old key
+        self.client.delete_secret(&self.get_selected_path())?;
+
+        self.update_list(FromCache::No)?;
+
+        // select the inserted secret
+        self.selected_item = self
+            .current_list
+            .iter()
+            .position(|x| x.name == new_key)
+            .unwrap_or(self.previous_selected_item);
+        self.update_selected_secret(FromCache::No)?;
+        self.print()?;
+        self.print_info("successfully renamed the key")
+    }
+
     fn update_list(&mut self, cache: FromCache) -> Result<()> {
         let path = self.path.join();
         let res = self.client.list_secrets(&path, cache)?;
@@ -189,9 +231,8 @@ impl Vaultwalker {
 
             return Ok(());
         }
-        let mut path = self.path.join();
-        path.push_str(&self.current_list[self.selected_item].name);
-        let res = self.client.get_secret(&path, cache)?;
+
+        let res = self.client.get_secret(&self.get_selected_path(), cache)?;
         self.selected_secret = Some(res);
 
         Ok(())
@@ -225,7 +266,8 @@ impl Vaultwalker {
 
                 Ok(line)
             }
-            Mode::TypingKey => Ok(format!("> {}", item)),
+            Mode::TypingKey(EditMode::Insert) => Ok(format!("> {}", item)),
+            Mode::TypingKey(EditMode::Update) => Ok("> ".to_string()),
             Mode::TypingSecret(_) => Ok(format!("> {} -> ", item)),
         }
     }
@@ -236,8 +278,7 @@ impl Vaultwalker {
 
         let mut extended_item = Vec::new();
         match self.mode {
-            Mode::Navigation | Mode::DeletingKey => (),
-            Mode::TypingKey => extended_item.push(VaultEntry {
+            Mode::TypingKey(EditMode::Insert) => extended_item.push(VaultEntry {
                 name: self.buffered_key.clone(),
                 is_dir: false,
             }),
@@ -245,6 +286,7 @@ impl Vaultwalker {
                 name: self.buffered_key.clone(),
                 is_dir: false,
             }),
+            _ => (),
         }
 
         if self.selected_item <= self.scroll {
@@ -295,7 +337,7 @@ impl Vaultwalker {
         }
 
         match self.mode {
-            Mode::TypingKey | Mode::TypingSecret(_) => {
+            Mode::TypingKey(_) | Mode::TypingSecret(_) => {
                 execute!(
                     stdout(),
                     MoveTo(
@@ -310,29 +352,37 @@ impl Vaultwalker {
         Ok(())
     }
 
-    fn print_message(&mut self, message: &str) -> Result<()> {
+    fn print_message_raw(&mut self, message: StyledContent<String>) -> Result<()> {
         if self
             .displayed_message
             .as_ref()
-            .is_some_and(|m| m == message)
+            .is_some_and(|m| m == message.content())
         {
             return Ok(());
         }
 
-        self.displayed_message = Some(message.to_owned());
+        self.displayed_message = Some(message.content().clone());
         execute!(
             stdout(),
             MoveTo(0, 10000),
             Clear(ClearType::CurrentLine),
-            Print(format!(" {} ", message).black().on_white()),
+            Print(message),
         )?;
 
         Ok(())
     }
 
+    fn print_info(&mut self, message: &str) -> Result<()> {
+        self.print_message_raw(format!(" {} ", message).black().on_white())
+    }
+
+    fn print_error(&mut self, err: Error) -> Result<()> {
+        self.print_message_raw(format!(" {} ", err).white().on_red())
+    }
+
     fn print_controls(&mut self) -> Result<()> {
-        self.print_message(
-            "Navigate with arrows or HJKL      copy [P]ath      copy [S]ecret      [A]dd secret      [U]pdate secret      [D]elete secret      [Q]uit      [C]lear cache    [O]pen help",
+        self.print_info(
+            "Navigate with arrows or HJKL      copy [P]ath      copy [S]ecret      [A]dd secret      [R]ename key      [U]pdate secret      [D]elete secret      [Q]uit      [C]lear cache    [O]pen help",
         )
     }
 
@@ -395,11 +445,11 @@ impl Vaultwalker {
                     self.print_controls()?;
                 }
                 KeyCode::Char('p') => {
-                    let mut path = self.path.join();
-                    path.push_str(&self.current_list[self.selected_item].name);
-                    self.clipboard.set_contents(path).unwrap();
+                    self.clipboard
+                        .set_contents(self.get_selected_path())
+                        .unwrap();
 
-                    self.print_message("path copied to clipboard")?;
+                    self.print_info("path copied to clipboard")?;
                 }
                 KeyCode::Char('s') => {
                     let entry = self.current_list[self.selected_item].clone();
@@ -410,23 +460,33 @@ impl Vaultwalker {
                     if let Some(secret) = self.selected_secret.as_ref() {
                         self.clipboard.set_contents(secret.into()).unwrap();
 
-                        self.print_message("secret copied to clipboard")?;
+                        self.print_info("secret copied to clipboard")?;
                     }
                 }
                 KeyCode::Char('a') => {
                     self.previous_selected_item = self.selected_item;
                     self.selected_item = self.current_list.len();
-                    self.mode = Mode::TypingKey;
+                    self.mode = Mode::TypingKey(EditMode::Insert);
 
                     needs_refresh = true;
                 }
                 KeyCode::Char('u') => {
-                    let entry = self.current_list[self.selected_item].clone();
+                    let entry = &self.current_list[self.selected_item];
                     if entry.is_dir {
                         return Ok(());
                     }
 
-                    self.mode = Mode::TypingSecret(SecretEdition::Update);
+                    self.mode = Mode::TypingSecret(EditMode::Update);
+
+                    needs_refresh = true;
+                }
+                KeyCode::Char('r') => {
+                    let entry = &self.current_list[self.selected_item];
+                    if entry.is_dir {
+                        return Ok(());
+                    }
+
+                    self.mode = Mode::TypingKey(EditMode::Update);
 
                     needs_refresh = true;
                 }
@@ -452,46 +512,50 @@ impl Vaultwalker {
         Ok(())
     }
 
-    fn handle_typing_key(&mut self) -> Result<()> {
+    fn handle_typing_key(&mut self, edit_mode: EditMode) -> Result<()> {
         let key = read_line()?;
         if key.is_empty() {
             self.mode = Mode::Navigation;
             self.buffered_key.clear();
             self.selected_item = self.previous_selected_item;
-            self.print()?;
-            self.print_message("the key must not be empty")?;
 
-            return Ok(());
+            return Err(Error::Application("the key must not be empty".to_owned()));
         }
 
         if key.ends_with('/') {
             self.mode = Mode::Navigation;
             self.buffered_key.clear();
             self.selected_item = self.previous_selected_item;
-            self.print()?;
-            self.print_message(
-                "to create a directory, please specify the key name, e.g. directory/keyName",
-            )?;
 
-            return Ok(());
+            return Err(Error::Application(
+                "to create a directory, please specify the key name, e.g. directory/keyName"
+                    .to_owned(),
+            ));
         }
 
-        self.buffered_key = key;
-        self.mode = Mode::TypingSecret(SecretEdition::Insert);
-
-        self.print()
+        match edit_mode {
+            EditMode::Insert => {
+                self.buffered_key = key;
+                self.mode = Mode::TypingSecret(EditMode::Insert);
+                self.print()
+            }
+            EditMode::Update => {
+                self.mode = Mode::Navigation;
+                self.rename_key(&key)
+            }
+        }
     }
 
-    fn handle_typing_secret(&mut self, secret_type: SecretEdition) -> Result<()> {
+    fn handle_typing_secret(&mut self, secret_type: EditMode) -> Result<()> {
         let secret = read_line()?;
         self.mode = Mode::Navigation;
         let key = match secret_type {
-            SecretEdition::Insert => self.buffered_key.clone(),
-            SecretEdition::Update => self.current_list[self.selected_item].name.clone(),
+            EditMode::Insert => self.buffered_key.clone(),
+            EditMode::Update => self.current_list[self.selected_item].name.clone(),
         };
         let path = format!("{}{}", self.path.join(), key);
 
-        let res = self.client.write_secret(&path, &secret);
+        self.client.write_secret(&path, &secret)?;
         self.update_list(FromCache::No)?;
 
         // select the inserted secret
@@ -503,26 +567,24 @@ impl Vaultwalker {
         self.update_selected_secret(FromCache::No)?;
 
         self.print()?;
-        if let Err(err) = res {
-            self.print_message(&err.to_string())?;
-        } else {
-            match secret_type {
-                SecretEdition::Insert => self.print_message(&format!(
-                    "added new key to the vault {} -> {}",
-                    path, secret
-                ))?,
-                SecretEdition::Update => {
-                    self.print_message(&format!("updated the secret of {} -> {}", path, secret))?
-                }
+
+        match secret_type {
+            EditMode::Insert => self.print_info(&format!(
+                "added new key to the vault {} -> {}",
+                path, secret
+            ))?,
+            EditMode::Update => {
+                self.print_info(&format!("updated the secret of {} -> {}", path, secret))?
             }
         }
+
         self.buffered_key.clear();
 
         Ok(())
     }
 
     fn handle_deleting_key(&mut self) -> Result<()> {
-        self.print_message(&format!(
+        self.print_info(&format!(
             "Are you sure you want to delete the key '{}'? (only 'yes' will be accepted): ",
             self.current_list[self.selected_item].name
         ))?;
@@ -533,12 +595,7 @@ impl Vaultwalker {
         if answer == "yes" {
             let mut path = self.path.join();
             path.push_str(&self.current_list[self.selected_item].name);
-            let res = self.client.delete_secret(&path);
-            if let Err(err) = res {
-                self.print_message(&err.to_string())?;
-
-                read()?;
-            }
+            self.client.delete_secret(&path)?;
 
             if self.selected_item >= self.current_list.len() - 1 {
                 self.selected_item -= 1;
@@ -551,17 +608,22 @@ impl Vaultwalker {
 
         self.mode = Mode::Navigation;
         self.print()?;
-        self.print_message(&result_message)
+        self.print_info(&result_message)
     }
 
     fn input_loop(&mut self) -> Result<()> {
         loop {
-            match self.mode {
+            let err = match self.mode {
                 Mode::Navigation => self.handle_navigation(),
-                Mode::TypingKey => self.handle_typing_key(),
-                Mode::TypingSecret(se) => self.handle_typing_secret(se),
+                Mode::TypingKey(em) => self.handle_typing_key(em),
+                Mode::TypingSecret(em) => self.handle_typing_secret(em),
                 Mode::DeletingKey => self.handle_deleting_key(),
-            }?;
+            };
+
+            if let Err(err) = err {
+                self.print()?;
+                self.print_error(err)?;
+            }
 
             if self.quit_requested {
                 disable_raw_mode()?;
