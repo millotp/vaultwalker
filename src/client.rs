@@ -33,7 +33,7 @@ pub struct ListResponse {
     pub keys: Vec<String>,
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone, Copy)]
 pub enum FromCache {
     Yes,
     No,

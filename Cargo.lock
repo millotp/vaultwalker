@@ -590,7 +590,7 @@ dependencies = [
 
 [[package]]
 name = "vaultwalker"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "clipboard",
  "crossterm",

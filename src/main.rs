@@ -196,16 +196,7 @@ impl Vaultwalker {
 
         // delete the old key
         self.client.delete_secret(&self.get_selected_path())?;
-
-        self.update_list(FromCache::No)?;
-
-        // select the inserted secret
-        self.selected_item = self
-            .current_list
-            .iter()
-            .position(|x| x.name == new_key)
-            .unwrap_or(self.previous_selected_item);
-        self.update_selected_secret(FromCache::No)?;
+        self.set_selected_item(new_key, FromCache::No)?;
         self.print()?;
         self.print_info("successfully renamed the key")
     }
@@ -236,6 +227,16 @@ impl Vaultwalker {
         self.selected_secret = Some(res);
 
         Ok(())
+    }
+
+    fn set_selected_item(&mut self, key: &str, cache: FromCache) -> Result<()> {
+        self.update_list(cache)?;
+        self.selected_item = self
+            .current_list
+            .iter()
+            .position(|x| x.name == key)
+            .unwrap_or(self.previous_selected_item);
+        self.update_selected_secret(cache)
     }
 
     fn refresh_all(&mut self) -> Result<()> {
@@ -421,12 +422,7 @@ impl Vaultwalker {
                         return Ok(());
                     }
                     let last = self.path.entries.pop().unwrap();
-                    self.update_list(FromCache::Yes)?;
-                    self.selected_item = self
-                        .current_list
-                        .iter()
-                        .position(|x| x.name == last.name)
-                        .unwrap();
+                    self.set_selected_item(&last.name, FromCache::Yes)?;
                     self.scroll = 0;
                     needs_refresh = true;
                 }
@@ -556,16 +552,7 @@ impl Vaultwalker {
         let path = format!("{}{}", self.path.join(), key);
 
         self.client.write_secret(&path, &secret)?;
-        self.update_list(FromCache::No)?;
-
-        // select the inserted secret
-        self.selected_item = self
-            .current_list
-            .iter()
-            .position(|x| x.name == key)
-            .unwrap_or(self.previous_selected_item);
-        self.update_selected_secret(FromCache::No)?;
-
+        self.set_selected_item(&key, FromCache::No)?;
         self.print()?;
 
         match secret_type {
@@ -603,12 +590,7 @@ impl Vaultwalker {
             // if this is the only item in the list, we need to climb up
             while self.current_list.len() == 1 {
                 let last = self.path.entries.pop().unwrap();
-                self.update_list(FromCache::Yes)?;
-                self.selected_item = self
-                    .current_list
-                    .iter()
-                    .position(|x| x.name == last.name)
-                    .unwrap();
+                self.set_selected_item(&last.name, FromCache::Yes)?;
                 self.scroll = 0;
             }
 
