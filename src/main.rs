@@ -129,6 +129,7 @@ struct Vaultwalker {
     root_len: usize,
     current_list: Vec<VaultEntry>,
     selected_item: usize,
+    previous_selected_item: usize,
     scroll: usize,
     selected_secret: Option<VaultSecret>,
     displayed_message: Option<String>,
@@ -147,6 +148,7 @@ impl Vaultwalker {
             path,
             current_list: vec![],
             selected_item: 0,
+            previous_selected_item: 0,
             scroll: 0,
             selected_secret: None,
             displayed_message: None,
@@ -175,6 +177,13 @@ impl Vaultwalker {
     }
 
     fn update_selected_secret(&mut self, cache: FromCache) -> Result<()> {
+        // this is a security to avoid panic
+        if self.selected_item >= self.current_list.len() {
+            self.selected_secret = None;
+
+            return Ok(());
+        }
+
         if self.current_list[self.selected_item].is_dir {
             self.selected_secret = None;
 
@@ -405,6 +414,7 @@ impl Vaultwalker {
                     }
                 }
                 KeyCode::Char('a') => {
+                    self.previous_selected_item = self.selected_item;
                     self.selected_item = self.current_list.len();
                     self.mode = Mode::TypingKey;
 
@@ -443,7 +453,30 @@ impl Vaultwalker {
     }
 
     fn handle_typing_key(&mut self) -> Result<()> {
-        self.buffered_key = read_line()?;
+        let key = read_line()?;
+        if key.is_empty() {
+            self.mode = Mode::Navigation;
+            self.buffered_key.clear();
+            self.selected_item = self.previous_selected_item;
+            self.print()?;
+            self.print_message("the key must not be empty")?;
+
+            return Ok(());
+        }
+
+        if key.ends_with('/') {
+            self.mode = Mode::Navigation;
+            self.buffered_key.clear();
+            self.selected_item = self.previous_selected_item;
+            self.print()?;
+            self.print_message(
+                "to create a directory, please specify the key name, e.g. directory/keyName",
+            )?;
+
+            return Ok(());
+        }
+
+        self.buffered_key = key;
         self.mode = Mode::TypingSecret(SecretEdition::Insert);
 
         self.print()
@@ -452,23 +485,23 @@ impl Vaultwalker {
     fn handle_typing_secret(&mut self, secret_type: SecretEdition) -> Result<()> {
         let secret = read_line()?;
         self.mode = Mode::Navigation;
-
-        let path = match secret_type {
-            SecretEdition::Insert => {
-                let mut path = self.path.join();
-                path.push_str(&self.buffered_key);
-                path
-            }
-            SecretEdition::Update => {
-                let mut path = self.path.join();
-                path.push_str(&self.current_list[self.selected_item].name);
-                path
-            }
+        let key = match secret_type {
+            SecretEdition::Insert => self.buffered_key.clone(),
+            SecretEdition::Update => self.current_list[self.selected_item].name.clone(),
         };
+        let path = format!("{}{}", self.path.join(), key);
 
         let res = self.client.write_secret(&path, &secret);
+        self.update_list(FromCache::No)?;
 
-        self.refresh_all()?;
+        // select the inserted secret
+        self.selected_item = self
+            .current_list
+            .iter()
+            .position(|x| x.name == key)
+            .unwrap_or(self.previous_selected_item);
+        self.update_selected_secret(FromCache::No)?;
+
         self.print()?;
         if let Err(err) = res {
             self.print_message(&err.to_string())?;
