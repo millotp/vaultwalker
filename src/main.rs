@@ -382,7 +382,7 @@ impl Vaultwalker {
 
     fn print_controls(&mut self) -> Result<()> {
         self.print_info(
-            "Navigate with arrows or HJKL      copy [P]ath      copy [S]ecret      [A]dd secret      [R]ename key      [U]pdate secret      [D]elete secret      [Q]uit      [C]lear cache    [O]pen help",
+            "Navigate with arrows or HJKL    copy [P]ath    copy [S]ecret    [A]dd secret    [R]ename key    [U]pdate secret    [D]elete secret    [Q]uit    [C]lear cache    [O]pen help",
         )
     }
 
@@ -591,6 +591,9 @@ impl Vaultwalker {
         execute!(stdout(), Print(" "))?;
 
         let answer = read_line()?;
+        // because the user presses on new line, we need to reset it
+        self.print()?;
+
         let mut result_message = format!("received '{}', the key was not deleted", answer);
         if answer == "yes" {
             let mut path = self.path.join();
