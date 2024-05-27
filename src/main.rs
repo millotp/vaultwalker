@@ -452,7 +452,7 @@ impl Vaultwalker {
                     self.print_info("path copied to clipboard")?;
                 }
                 KeyCode::Char('s') => {
-                    let entry = self.current_list[self.selected_item].clone();
+                    let entry = &self.current_list[self.selected_item];
                     if entry.is_dir {
                         return Ok(());
                     }
@@ -600,8 +600,21 @@ impl Vaultwalker {
             path.push_str(&self.current_list[self.selected_item].name);
             self.client.delete_secret(&path)?;
 
+            // if this is the only item in the list, we need to climb up
+            while self.current_list.len() == 1 {
+                let last = self.path.entries.pop().unwrap();
+                self.update_list(FromCache::Yes)?;
+                self.selected_item = self
+                    .current_list
+                    .iter()
+                    .position(|x| x.name == last.name)
+                    .unwrap();
+                self.scroll = 0;
+            }
+
+            // if the last item was deleted, we need to move the selection up
             if self.selected_item >= self.current_list.len() - 1 {
-                self.selected_item -= 1;
+                self.selected_item = self.current_list.len() - 1;
             }
 
             self.refresh_all()?;
