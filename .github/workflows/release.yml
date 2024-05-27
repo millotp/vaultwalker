@@ -66,6 +66,10 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install dependencies for ubuntu
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get install -y libxcb-xfixes0-dev libxcb-shape0-dev
+
       - name: Set target variables
         shell: bash
         run: |
