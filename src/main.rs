@@ -11,13 +11,12 @@ extern crate clipboard;
 
 use clipboard::{ClipboardContext, ClipboardProvider};
 use crossterm::{
-    cursor::{self, MoveTo},
+    cursor::{self, MoveDown, MoveTo, MoveToNextLine},
     event::{read, Event, KeyCode, KeyModifiers},
     execute,
     style::{Print, Stylize},
-    terminal,
     terminal::{
-        disable_raw_mode, enable_raw_mode, Clear, ClearType, EnterAlternateScreen,
+        self, disable_raw_mode, enable_raw_mode, Clear, ClearType, EnterAlternateScreen,
         LeaveAlternateScreen,
     },
 };
@@ -217,7 +216,7 @@ impl Vaultwalker {
 
                 Ok(line)
             }
-            Mode::TypingKey => Ok(format!("> {}", item,)),
+            Mode::TypingKey => Ok(format!("> {}", item)),
             Mode::TypingSecret(_) => Ok(format!("> {} -> ", item)),
         }
     }
@@ -263,12 +262,11 @@ impl Vaultwalker {
             .skip(self.scroll)
             .take(height as usize - 1)
         {
-            let mut line = String::new();
-            if i == self.scroll {
-                line.push_str(&format!("{} ", self.path.join().bold()));
+            let mut line = if i == self.scroll {
+                format!("{} ", self.path.join().bold())
             } else {
-                line.push_str(&format!("{:prefix$}", "", prefix = prefix_len));
-            }
+                format!("{:prefix$}", "", prefix = prefix_len)
+            };
 
             if i == self.selected_item {
                 line.push_str(&self.selected_line_for_current_mode(
@@ -276,11 +274,15 @@ impl Vaultwalker {
                     (width as i32 - line.len() as i32).max(3) as usize,
                 )?);
                 len_selected = line.len();
+                if i == self.scroll {
+                    // if the selected item is the first item, we need to remove the bold prefix
+                    len_selected -= 8;
+                }
             } else {
-                line.push_str(&format!("  {}", item))
+                line.push_str(&format!("  {}", item));
             }
 
-            execute!(stdout(), Print(line), cursor::MoveToNextLine(1))?;
+            execute!(stdout(), Print(line), MoveToNextLine(1))?;
         }
 
         match self.mode {
@@ -587,7 +589,7 @@ fn main() {
             stdout(),
             LeaveAlternateScreen,
             cursor::Show,
-            cursor::MoveDown(20000),
+            MoveDown(20000),
             Print(err)
         )
         .unwrap();
