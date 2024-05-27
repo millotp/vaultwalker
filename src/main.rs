@@ -3,24 +3,28 @@ mod error;
 
 use std::{
     fs::read_to_string,
-    io::{stdout, Write},
+    io::{stdin, stdout},
 };
 
 extern crate clipboard;
 
 use clipboard::{ClipboardContext, ClipboardProvider};
+use crossterm::{
+    cursor::{self, MoveTo},
+    event::{read, Event, KeyCode, KeyModifiers},
+    execute,
+    style::{Print, Stylize},
+    terminal,
+    terminal::{
+        disable_raw_mode, enable_raw_mode, Clear, ClearType, EnterAlternateScreen,
+        LeaveAlternateScreen,
+    },
+};
 
 use client::{FromCache, VaultSecret};
-use console::{style, Key, Term};
 use error::{Error, Result};
 use gumdrop::Options;
 use home::home_dir;
-use termion::{
-    clear::{All, CurrentLine},
-    cursor::{Goto, Hide, HideCursor, Show},
-    screen::{IntoAlternateScreen, ToMainScreen},
-    terminal_size,
-};
 
 use crate::client::VaultClient;
 
@@ -80,6 +84,19 @@ fn shorten_string(s: String, max_len: usize) -> String {
     }
 }
 
+fn read_line() -> Result<String> {
+    disable_raw_mode()?;
+    let mut line = String::new();
+    stdin().read_line(&mut line)?;
+    enable_raw_mode()?;
+
+    while line.ends_with('\n') {
+        line.pop();
+    }
+
+    return Ok(line);
+}
+
 #[derive(PartialEq, Copy, Clone)]
 enum SecretEdition {
     Insert,
@@ -96,8 +113,6 @@ enum Mode {
 
 struct Vaultwalker {
     client: VaultClient,
-    screen: Box<dyn Write>,
-    term: Term,
     clipboard: ClipboardContext,
     mode: Mode,
     quit_requested: bool,
@@ -112,16 +127,10 @@ struct Vaultwalker {
 }
 
 impl Vaultwalker {
-    fn new(host: String, token: String, root: String, use_alternate_screen: bool) -> Result<Self> {
+    fn new(host: String, token: String, root: String) -> Result<Self> {
         let path = VaultPath::decode(&root);
         let vw = Self {
             client: VaultClient::new(&host, &token),
-            screen: if use_alternate_screen {
-                Box::new(HideCursor::from(stdout().into_alternate_screen()?))
-            } else {
-                Box::new(HideCursor::from(stdout()))
-            },
-            term: Term::stdout(),
             clipboard: ClipboardProvider::new().unwrap(),
             mode: Mode::Navigation,
             quit_requested: false,
@@ -139,11 +148,11 @@ impl Vaultwalker {
     }
 
     fn setup(&mut self) -> Result<()> {
-        write!(self.screen, "{}", Hide)?;
+        execute!(stdout(), cursor::Hide, EnterAlternateScreen)?;
+        enable_raw_mode()?;
         self.update_list(FromCache::No)?;
         self.print()?;
         self.print_controls()?;
-        self.screen.flush()?;
 
         Ok(())
     }
@@ -196,9 +205,7 @@ impl Vaultwalker {
                     if let Some(secret) = secret.secret.as_ref() {
                         line.push_str(&format!(
                             " -> {}",
-                            &style(shorten_string(secret.clone(), remaining))
-                                .bold()
-                                .bright()
+                            shorten_string(secret.clone(), remaining).bold()
                         ));
                     }
                 }
@@ -219,8 +226,8 @@ impl Vaultwalker {
     }
 
     fn print(&mut self) -> Result<()> {
-        write!(self.screen, "{}{}", All, Goto(1, 1))?;
-        let (width, height) = terminal_size()?;
+        execute!(stdout(), Clear(ClearType::All), MoveTo(0, 0))?;
+        let (width, height) = terminal::size()?;
 
         let mut extended_item = Vec::new();
         match self.mode {
@@ -261,7 +268,7 @@ impl Vaultwalker {
         {
             let mut line = String::new();
             if i == self.scroll {
-                line.push_str(&format!("{} ", &style(self.path.join()).bold().bright()));
+                line.push_str(&format!("{} ", self.path.join().bold()));
             } else {
                 line.push_str(&format!("{:prefix$}", "", prefix = prefix_len));
             }
@@ -280,28 +287,21 @@ impl Vaultwalker {
                 ))
             }
 
-            if i < self.current_list.len() {
-                line.push('\n')
-            }
-
-            self.screen.write_all(line.as_bytes())?;
+            execute!(stdout(), Print(line), cursor::MoveToNextLine(1))?;
         }
 
         match self.mode {
             Mode::TypingKey | Mode::TypingSecret(_) => {
-                write!(
-                    self.screen,
-                    "{}",
-                    Goto(
-                        len_selected as u16 + 1,
-                        self.selected_item as u16 + 1 - self.scroll as u16
+                execute!(
+                    stdout(),
+                    MoveTo(
+                        len_selected as u16,
+                        self.selected_item as u16 - self.scroll as u16
                     )
                 )?;
             }
             _ => (),
         };
-
-        self.screen.flush()?;
 
         Ok(())
     }
@@ -316,14 +316,12 @@ impl Vaultwalker {
         }
 
         self.displayed_message = Some(message.to_owned());
-        write!(
-            self.screen,
-            "{}{}{}",
-            Goto(1, 10000),
-            CurrentLine,
-            style(message).black().on_white()
+        execute!(
+            stdout(),
+            MoveTo(0, 10000),
+            Clear(ClearType::CurrentLine),
+            Print(message.black().on_white()),
         )?;
-        self.screen.flush()?;
 
         Ok(())
     }
@@ -336,99 +334,106 @@ impl Vaultwalker {
 
     fn handle_navigation(&mut self) -> Result<()> {
         let mut needs_refresh = false;
-        match self.term.read_key()? {
-            Key::ArrowDown | Key::Char('j') => {
-                if self.selected_item < self.current_list.len() - 1 {
-                    self.selected_item += 1;
+        match read()? {
+            Event::Key(event) => match event.code {
+                KeyCode::Down | KeyCode::Char('j') => {
+                    if self.selected_item < self.current_list.len() - 1 {
+                        self.selected_item += 1;
+                    }
+                    needs_refresh = true;
                 }
-                needs_refresh = true;
-            }
-            Key::ArrowUp | Key::Char('k') => {
-                if self.selected_item > 0 {
-                    self.selected_item -= 1;
+                KeyCode::Up | KeyCode::Char('k') => {
+                    if self.selected_item > 0 {
+                        self.selected_item -= 1;
+                    }
+                    needs_refresh = true;
                 }
-                needs_refresh = true;
-            }
-            Key::ArrowRight | Key::Char('l') => {
-                if self.path.entries.len() > 32 {
-                    return Ok(());
+                KeyCode::Right | KeyCode::Char('l') => {
+                    if self.path.entries.len() > 32 {
+                        return Ok(());
+                    }
+                    let entry = self.current_list[self.selected_item].clone();
+                    if !entry.is_dir {
+                        return Ok(());
+                    }
+                    self.path.entries.push(entry);
+                    self.update_list(FromCache::Yes)?;
+                    self.selected_item = self.selected_item.min(self.current_list.len() - 1);
+                    self.scroll = 0;
+                    needs_refresh = true;
                 }
-                let entry = self.current_list[self.selected_item].clone();
-                if !entry.is_dir {
-                    return Ok(());
+                KeyCode::Left | KeyCode::Char('h') => {
+                    if self.path.entries.len() < self.root_len + 1 {
+                        return Ok(());
+                    }
+                    let last = self.path.entries.pop().unwrap();
+                    self.update_list(FromCache::Yes)?;
+                    self.selected_item = self
+                        .current_list
+                        .iter()
+                        .position(|x| x.name == last.name)
+                        .unwrap();
+                    self.scroll = 0;
+                    needs_refresh = true;
                 }
-                self.path.entries.push(entry);
-                self.update_list(FromCache::Yes)?;
-                self.selected_item = self.selected_item.min(self.current_list.len() - 1);
-                self.scroll = 0;
-                needs_refresh = true;
-            }
-            Key::ArrowLeft | Key::Char('h') => {
-                if self.path.entries.len() < self.root_len + 1 {
-                    return Ok(());
-                }
-                let last = self.path.entries.pop().unwrap();
-                self.update_list(FromCache::Yes)?;
-                self.selected_item = self
-                    .current_list
-                    .iter()
-                    .position(|x| x.name == last.name)
-                    .unwrap();
-                self.scroll = 0;
-                needs_refresh = true;
-            }
-            Key::Char('c') => {
-                self.client.clear_cache();
-                self.update_list(FromCache::Yes)?;
-                self.update_selected_secret(FromCache::Yes)?;
+                KeyCode::Char('c') => {
+                    if event.modifiers.contains(KeyModifiers::CONTROL) {
+                        self.quit_requested = true
+                    } else {
+                        self.client.clear_cache();
+                        self.update_list(FromCache::Yes)?;
+                        self.update_selected_secret(FromCache::Yes)?;
+                    }
 
-                needs_refresh = true;
-            }
-            Key::Char('p') => {
-                let mut path = self.path.join();
-                path.push_str(&self.current_list[self.selected_item].name);
-                self.clipboard.set_contents(path).unwrap();
-
-                self.print_message("path copied to clipboard")?;
-            }
-            Key::Char('s') => {
-                let entry = self.current_list[self.selected_item].clone();
-                if entry.is_dir {
-                    return Ok(());
+                    needs_refresh = true;
                 }
+                KeyCode::Char('p') => {
+                    let mut path = self.path.join();
+                    path.push_str(&self.current_list[self.selected_item].name);
+                    self.clipboard.set_contents(path).unwrap();
 
-                if let Some(secret) = self.selected_secret.as_ref() {
-                    if let Some(secret) = secret.secret.as_ref() {
-                        self.clipboard.set_contents(secret.clone()).unwrap();
+                    self.print_message("path copied to clipboard")?;
+                }
+                KeyCode::Char('s') => {
+                    let entry = self.current_list[self.selected_item].clone();
+                    if entry.is_dir {
+                        return Ok(());
+                    }
 
-                        self.print_message("secret copied to clipboard")?;
+                    if let Some(secret) = self.selected_secret.as_ref() {
+                        if let Some(secret) = secret.secret.as_ref() {
+                            self.clipboard.set_contents(secret.clone()).unwrap();
+
+                            self.print_message("secret copied to clipboard")?;
+                        }
                     }
                 }
-            }
-            Key::Char('a') => {
-                self.selected_item = self.current_list.len();
-                write!(self.screen, "{}", Show)?;
-                self.mode = Mode::TypingKey;
+                KeyCode::Char('a') => {
+                    self.selected_item = self.current_list.len();
+                    execute!(stdout(), cursor::Show)?;
+                    self.mode = Mode::TypingKey;
 
-                needs_refresh = true;
-            }
-            Key::Char('u') => {
-                let entry = self.current_list[self.selected_item].clone();
-                if entry.is_dir {
-                    return Ok(());
+                    needs_refresh = true;
                 }
+                KeyCode::Char('u') => {
+                    let entry = self.current_list[self.selected_item].clone();
+                    if entry.is_dir {
+                        return Ok(());
+                    }
 
-                write!(self.screen, "{}", Show)?;
-                self.mode = Mode::TypingSecret(SecretEdition::Update);
+                    execute!(stdout(), cursor::Show)?;
+                    self.mode = Mode::TypingSecret(SecretEdition::Update);
 
-                needs_refresh = true;
-            }
-            Key::Char('d') => {
-                self.mode = Mode::DeletingKey;
+                    needs_refresh = true;
+                }
+                KeyCode::Char('d') => {
+                    self.mode = Mode::DeletingKey;
 
-                needs_refresh = true;
-            }
-            Key::Escape | Key::Char('q') => self.quit_requested = true,
+                    needs_refresh = true;
+                }
+                KeyCode::Esc | KeyCode::Char('q') => self.quit_requested = true,
+                _ => (),
+            },
             _ => (),
         }
 
@@ -445,14 +450,14 @@ impl Vaultwalker {
     }
 
     fn handle_typing_key(&mut self) -> Result<()> {
-        self.buffered_key = self.term.read_line()?;
+        self.buffered_key = read_line()?;
         self.mode = Mode::TypingSecret(SecretEdition::Insert);
 
         self.print()
     }
 
     fn handle_typing_secret(&mut self, secret_type: SecretEdition) -> Result<()> {
-        let secret = self.term.read_line()?;
+        let secret = read_line()?;
         self.mode = Mode::Navigation;
 
         let path = match secret_type {
@@ -472,7 +477,7 @@ impl Vaultwalker {
 
         self.refresh_all()?;
 
-        write!(self.screen, "{}", Hide)?;
+        execute!(stdout(), cursor::Hide)?;
         self.print()?;
         if let Err(err) = res {
             self.print_message(&err.to_string())?;
@@ -493,12 +498,12 @@ impl Vaultwalker {
     }
 
     fn handle_deleting_key(&mut self) -> Result<()> {
-        write!(self.screen, "{}", Show)?;
+        execute!(stdout(), cursor::Show)?;
         self.print_message(&format!(
             "Are you sure you want to delete the key '{}'? (only 'yes' will be accepted): ",
             self.current_list[self.selected_item].name
         ))?;
-        let answer = self.term.read_line()?;
+        let answer = read_line()?;
         if answer == "yes" {
             let mut path = self.path.join();
             path.push_str(&self.current_list[self.selected_item].name);
@@ -506,7 +511,7 @@ impl Vaultwalker {
             if let Err(err) = res {
                 self.print_message(&err.to_string())?;
 
-                self.term.read_key()?;
+                read()?;
             }
 
             self.refresh_all()?;
@@ -514,7 +519,7 @@ impl Vaultwalker {
 
         self.mode = Mode::Navigation;
 
-        write!(self.screen, "{}", Hide)?;
+        execute!(stdout(), cursor::Hide)?;
 
         self.print()
     }
@@ -529,6 +534,8 @@ impl Vaultwalker {
             }?;
 
             if self.quit_requested {
+                disable_raw_mode()?;
+                execute!(stdout(), LeaveAlternateScreen, cursor::Show)?;
                 return Ok(());
             }
         }
@@ -551,7 +558,7 @@ struct Args {
 }
 
 fn run(host: String, token: String, root: String) -> Result<()> {
-    let mut vaultwalker = Vaultwalker::new(host, token, root, true)?;
+    let mut vaultwalker = Vaultwalker::new(host, token, root)?;
 
     vaultwalker.setup()?;
     vaultwalker.input_loop()
@@ -573,13 +580,22 @@ fn main() {
         .unwrap_or_else(|| read_to_string(home_dir().unwrap().join(".vault-token")).unwrap());
 
     ctrlc::set_handler(|| {
-        write!(stdout(), "{}{}", ToMainScreen, Show).unwrap();
+        disable_raw_mode().unwrap();
+        execute!(stdout(), LeaveAlternateScreen, cursor::Show).unwrap();
         std::process::exit(0);
     })
     .expect("Error setting Ctrl-C handler");
 
     run(host, token, root).unwrap_or_else(|err: Error| {
-        println!("{}", err);
+        disable_raw_mode().unwrap();
+        execute!(
+            stdout(),
+            LeaveAlternateScreen,
+            cursor::Show,
+            cursor::MoveDown(20000),
+            Print(err)
+        )
+        .unwrap();
         std::process::exit(0);
     });
 }
