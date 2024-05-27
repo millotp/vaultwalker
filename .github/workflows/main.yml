@@ -24,11 +24,9 @@ jobs:
             os: windows-latest
             target: x86_64-pc-windows-msvc
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
 
       - name: Install dependencies for ubuntu
         if: matrix.os == 'ubuntu-latest'

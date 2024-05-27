@@ -38,10 +38,19 @@ jobs:
             exit 1
           fi
 
+      - name: Generate a changelog
+        uses: orhun/git-cliff-action@v3
+        with:
+          config: cliff.toml
+          args: --verbose --current --strip header
+        env:
+          OUTPUT: CHANGELOG.md
+          GITHUB_REPO: ${{ github.repository }}
+
       - name: Create GitHub release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release create $VERSION --draft --verify-tag --title $VERSION
+        run: gh release create $VERSION --draft --verify-tag --notes-file CHANGELOG.md --title $VERSION
 
     outputs:
       version: ${{ env.VERSION }}
@@ -66,11 +75,9 @@ jobs:
             os: windows-latest
             target: x86_64-pc-windows-msvc
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
 
       - name: Install dependencies for ubuntu
         if: matrix.os == 'ubuntu-latest'
@@ -107,9 +114,9 @@ jobs:
       - name: Creating directory for archive
         shell: bash
         run: |
-          mkdir -p "$ARCHIVE"/complete
+          mkdir -p "$ARCHIVE"
           cp "$BIN" "$ARCHIVE"/
-          cp {README.md,LICENSE} "$ARCHIVE"/
+          cp {README.md,LICENSE,CHANGELOG.md} "$ARCHIVE"/
 
       - name: Build archive (Windows)
         shell: bash
@@ -135,3 +142,27 @@ jobs:
         shell: bash
         run: |
           gh release upload "${{ needs.create-release.outputs.version }}" ${{ env.ASSET }} ${{ env.ASSET_SUM }}
+
+  publish:
+    name: Publish to crates.io
+    runs-on: macos-latest
+    needs: build-release
+    environment: crates.io
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Publish
+        # https://doc.rust-lang.org/cargo/reference/config.html?highlight=CARGO_REGISTRY_TOKEN#credentials
+        run: >
+          cargo publish
+          --verbose
+          --locked
+          --no-verify
+          --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Publish the github release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "${{ needs.create-release.outputs.version }}" --draft=false --latest
