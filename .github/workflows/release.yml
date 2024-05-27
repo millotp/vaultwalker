@@ -50,6 +50,8 @@ jobs:
     name: build-release
     needs: ['create-release']
     runs-on: ${{ matrix.os }}
+    env:
+      RUST_BACKTRACE: 1
     strategy:
       fail-fast: false
       matrix:
@@ -83,7 +85,7 @@ jobs:
       - name: Build release binary
         shell: bash
         run: |
-          cargo build --verbose --release
+          cargo build --verbose --release ${{ env.TARGET_FLAGS }}
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
             bin="target/${{ matrix.target }}/release/vw.exe"
           else
@@ -132,4 +134,4 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
-          gh release upload "$${{ needs.create-release.outputs.version }}" ${{ env.ASSET }} ${{ env.ASSET_SUM }}
+          gh release upload "${{ needs.create-release.outputs.version }}" ${{ env.ASSET }} ${{ env.ASSET_SUM }}
