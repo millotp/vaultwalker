@@ -21,7 +21,7 @@ use crossterm::{
     },
 };
 
-use client::{FromCache, VaultSecret};
+use client::{FromCache, HttpClient, UreqClient, VaultSecret};
 use error::{Error, Result};
 use gumdrop::Options;
 use home::home_dir;
@@ -120,8 +120,8 @@ enum Mode {
     DeletingKey,
 }
 
-struct Vaultwalker {
-    client: VaultClient,
+struct Vaultwalker<H: HttpClient> {
+    client: VaultClient<H>,
     clipboard: ClipboardContext,
     mode: Mode,
     quit_requested: bool,
@@ -136,11 +136,11 @@ struct Vaultwalker {
     buffered_key: String,
 }
 
-impl Vaultwalker {
-    fn new(host: String, token: String, root: String) -> Result<Self> {
+impl<H: HttpClient> Vaultwalker<H> {
+    fn new(http_client: H, root: String) -> Result<Self> {
         let path = VaultPath::decode(&root);
         let vw = Self {
-            client: VaultClient::new(&host, &token),
+            client: VaultClient::new(http_client),
             clipboard: ClipboardProvider::new().unwrap(),
             mode: Mode::Navigation,
             quit_requested: false,
@@ -666,7 +666,8 @@ struct ParsedArgs {
 }
 
 fn run(host: String, token: String, root: String) -> Result<()> {
-    let mut vaultwalker = Vaultwalker::new(host, token, root)?;
+    let ureq_client = UreqClient::new(&host, &token);
+    let mut vaultwalker = Vaultwalker::new(ureq_client, root)?;
 
     vaultwalker.setup()?;
     vaultwalker.input_loop()

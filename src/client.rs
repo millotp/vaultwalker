@@ -68,16 +68,32 @@ pub trait HttpClient {
         path: &str,
         body: Option<TBody>,
     ) -> Result<()>;
+    fn clear_cache(&mut self);
 }
 
-pub struct VaultClient {
+pub struct UreqClient {
     client: Agent,
     vault_addr: String,
     token: String,
     cache: HashMap<String, String>,
 }
 
-impl HttpClient for VaultClient {
+impl UreqClient {
+    pub fn new(addr: &str, token: &str) -> Self {
+        let client = AgentBuilder::new()
+            .timeout_read(Duration::from_secs(5))
+            .timeout_write(Duration::from_secs(5))
+            .build();
+        Self {
+            client,
+            vault_addr: addr.to_string(),
+            token: token.into(),
+            cache: HashMap::new(),
+        }
+    }
+}
+
+impl HttpClient for UreqClient {
     fn read<T: DeserializeOwned>(
         &mut self,
         method: &str,
@@ -130,20 +146,19 @@ impl HttpClient for VaultClient {
             Err(err) => Err(Error::Ureq(Box::new(err))),
         }
     }
+
+    fn clear_cache(&mut self) {
+        self.cache.clear();
+    }
 }
 
-impl VaultClient {
-    pub fn new(addr: &str, token: &str) -> Self {
-        let client = AgentBuilder::new()
-            .timeout_read(Duration::from_secs(5))
-            .timeout_write(Duration::from_secs(5))
-            .build();
-        Self {
-            client,
-            vault_addr: addr.to_string(),
-            token: token.into(),
-            cache: HashMap::new(),
-        }
+pub struct VaultClient<H: HttpClient> {
+    client: H,
+}
+
+impl<H: HttpClient> VaultClient<H> {
+    pub fn new(client: H) -> Self {
+        Self { client }
     }
 
     pub fn get_secret<T: DeserializeOwned + std::fmt::Debug>(
@@ -151,7 +166,9 @@ impl VaultClient {
         path: &str,
         cache: FromCache,
     ) -> Result<T> {
-        let res = self.read::<T>("GET", &format!("v1/{}", path), cache)?;
+        let res = self
+            .client
+            .read::<T>("GET", &format!("v1/{}", path), cache)?;
         match res.data {
             Some(data) => Ok(data),
             None => Err(Error::Vault(format!(
@@ -162,7 +179,7 @@ impl VaultClient {
     }
 
     pub fn list_secrets(&mut self, path: &str, cache: FromCache) -> Result<ListResponse> {
-        let res = self.read("LIST", &format!("v1/{}", path), cache)?;
+        let res = self.client.read("LIST", &format!("v1/{}", path), cache)?;
         match res.data {
             Some(data) => Ok(data),
             None => Err(Error::Vault(format!(
@@ -173,7 +190,7 @@ impl VaultClient {
     }
 
     pub fn write_secret(&mut self, path: &str, secret: &str) -> Result<()> {
-        self.write(
+        self.client.write(
             "POST",
             &format!("v1/{}", path),
             Some(VaultSecret {
@@ -184,10 +201,11 @@ impl VaultClient {
     }
 
     pub fn delete_secret(&mut self, path: &str) -> Result<()> {
-        self.write::<()>("DELETE", &format!("v1/{}", path), None)
+        self.client
+            .write::<()>("DELETE", &format!("v1/{}", path), None)
     }
 
     pub fn clear_cache(&mut self) {
-        self.cache.clear();
+        self.client.clear_cache();
     }
 }
