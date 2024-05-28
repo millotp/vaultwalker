@@ -2,7 +2,7 @@ mod client;
 mod error;
 
 use std::{
-    fmt::{self},
+    fmt,
     fs::read_to_string,
     io::{stdin, stdout},
 };
@@ -469,7 +469,9 @@ impl Vaultwalker {
                 KeyCode::Char('u') => {
                     let entry = &self.current_list[self.selected_item];
                     if entry.is_dir {
-                        return Ok(());
+                        return Err(Error::Application(
+                            "cannot update a directory, please select a key".to_owned(),
+                        ));
                     }
 
                     self.mode = Mode::TypingSecret(EditMode::Update);
@@ -479,7 +481,9 @@ impl Vaultwalker {
                 KeyCode::Char('r') => {
                     let entry = &self.current_list[self.selected_item];
                     if entry.is_dir {
-                        return Ok(());
+                        return Err(Error::Application(
+                            "cannot rename a directory, please select a key".to_owned(),
+                        ));
                     }
 
                     self.mode = Mode::TypingKey(EditMode::Update);
@@ -487,6 +491,12 @@ impl Vaultwalker {
                     needs_refresh = true;
                 }
                 KeyCode::Char('d') => {
+                    let entry = &self.current_list[self.selected_item];
+                    if entry.is_dir {
+                        return Err(Error::Application(
+                            "cannot delete a directory, please select a key".to_owned(),
+                        ));
+                    }
                     self.mode = Mode::DeletingKey;
 
                     needs_refresh = true;
@@ -580,8 +590,8 @@ impl Vaultwalker {
         let answer = read_line()?;
         // because the user presses on new line, we need to reset it
         self.print()?;
+        self.mode = Mode::Navigation;
 
-        let mut result_message = format!("received '{}', the key was not deleted", answer);
         if answer == "yes" {
             let mut path = self.path.join();
             path.push_str(&self.current_list[self.selected_item].name);
@@ -600,13 +610,15 @@ impl Vaultwalker {
             }
 
             self.refresh_all()?;
-
-            result_message = format!("deleted the key '{}'", path);
+            self.print()?;
+            self.print_info(&format!("deleted the key '{}'", path))
+        } else {
+            self.print()?;
+            self.print_error(Error::Application(format!(
+                "received '{}', the key was not deleted",
+                answer
+            )))
         }
-
-        self.mode = Mode::Navigation;
-        self.print()?;
-        self.print_info(&result_message)
     }
 
     fn input_loop(&mut self) -> Result<()> {
