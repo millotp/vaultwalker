@@ -659,6 +659,12 @@ struct Args {
     token: Option<String>,
 }
 
+struct ParsedArgs {
+    host: String,
+    token: String,
+    root: String,
+}
+
 fn run(host: String, token: String, root: String) -> Result<()> {
     let mut vaultwalker = Vaultwalker::new(host, token, root)?;
 
@@ -666,7 +672,7 @@ fn run(host: String, token: String, root: String) -> Result<()> {
     vaultwalker.input_loop()
 }
 
-fn main() {
+fn parse_args() -> Result<ParsedArgs> {
     let opts = Args::parse_args_default_or_exit();
 
     let mut root = opts.root_path;
@@ -674,17 +680,26 @@ fn main() {
         root += "/";
     }
 
-    let host = opts
-        .host
-        .unwrap_or_else(|| std::env::var("VAULT_ADDR").unwrap());
-    let token = opts
-        .token
-        .unwrap_or_else(|| read_to_string(home_dir().unwrap().join(".vault-token")).unwrap());
+    let host = opts.host.or_else(|| std::env::var("VAULT_ADDR").ok()).ok_or(Error::Application(
+        "please specify the vault server URL with -H option or set the VAULT_ADDR environment variable".to_owned(),
+    ))?;
+    let token = opts.token.or_else(|| read_to_string(home_dir().unwrap().join(".vault-token")).ok()).ok_or(Error::Application(
+        "cannot find ~/.vault-token file, please specify the token with -t option or use the 'vault login' command to create it".to_owned()
+    ))?;
+
+    Ok(ParsedArgs { host, token, root })
+}
+
+fn main() {
+    let ParsedArgs { host, token, root } = parse_args().unwrap_or_else(|err: Error| {
+        eprintln!("{}", err);
+        std::process::exit(2);
+    });
 
     ctrlc::set_handler(|| {
         disable_raw_mode().unwrap();
         execute!(stdout(), LeaveAlternateScreen, cursor::Show).unwrap();
-        std::process::exit(0);
+        std::process::exit(1);
     })
     .expect("Error setting Ctrl-C handler");
 
@@ -698,7 +713,7 @@ fn main() {
             Print(err)
         )
         .unwrap();
-        std::process::exit(0);
+        std::process::exit(1);
     });
 }
 
