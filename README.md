@@ -35,7 +35,7 @@ vw -h
 
 ## Features
 
-Navigate with the arrow to select any credentials, then use `P` to copy the path to the secret, or `S` to copy the secret itself.
+Navigate with the arrow to select any credentials (or HJKL), then use `P` to copy the path to the secret, or `S` to copy the secret itself.
 
 To add a new key:
 - Navigate to the correct path and press `A`
@@ -50,10 +50,24 @@ To delete a key:
 - Select the key you want to delete and press `D`
 - Enter `yes` to confirm, then `Enter`
 
+To rename a key:
+- Select the key you want to rename and press `R`
+- Write the new name of the key, press `Enter`
+
+To quit the program press `Q` or `Ctrl+C`.
+You can also press `C` to clear the cache refresh the current path.
+To view the list of options at any time, press `O`.
+
 ## Development
 
-Run with `cargo run secret/my_company`.
+Clone the repository and run `cargo run secret/my_company`.
 
 ### Publishing
 
-`cargo publish`
+The changelog is generated with [git-cliff](https://git-cliff.org/), to update it run `git-cliff` and commit the changes.
+Before publishing, follow these steps:
+- Update the version in `Cargo.toml`
+- Push your final commit `git push`
+- Check that the CI is passing;
+- Create a new tag with the version number `git tag 0.1.0`
+- Push the tag `git push --tags`
