@@ -162,6 +162,7 @@ impl<H: HttpClient> Vaultwalker<H> {
         execute!(stdout(), cursor::Hide, EnterAlternateScreen)?;
         enable_raw_mode()?;
         self.update_list(FromCache::No)?;
+        self.update_selected_secret(FromCache::No)?;
         self.print()?;
         self.print_controls()?;
 
@@ -169,10 +170,7 @@ impl<H: HttpClient> Vaultwalker<H> {
     }
 
     fn get_selected_path(&self) -> String {
-        let mut path = self.path.join();
-        path.push_str(&self.current_list[self.selected_item].name);
-
-        path
+        self.path.join() + &self.current_list[self.selected_item].name
     }
 
     fn rename_key(&mut self, new_key: &str) -> Result<()> {
@@ -683,9 +681,7 @@ fn run(host: String, token: String, root: String) -> Result<()> {
     }
 }
 
-fn parse_args() -> Result<ParsedArgs> {
-    let opts = Args::parse_args_default_or_exit();
-
+fn parse_args(opts: Args) -> Result<ParsedArgs> {
     let mut root = opts.root_path;
     if !root.ends_with('/') {
         root += "/";
@@ -702,10 +698,11 @@ fn parse_args() -> Result<ParsedArgs> {
 }
 
 fn main() {
-    let ParsedArgs { host, token, root } = parse_args().unwrap_or_else(|err: Error| {
-        eprintln!("{}", err);
-        std::process::exit(2);
-    });
+    let ParsedArgs { host, token, root } = parse_args(Args::parse_args_default_or_exit())
+        .unwrap_or_else(|err: Error| {
+            eprintln!("{}", err);
+            std::process::exit(2);
+        });
 
     ctrlc::set_handler(|| {
         disable_raw_mode().unwrap();
@@ -767,5 +764,65 @@ mod tests {
     fn test_shorten_string() {
         assert_eq!(shorten_string("test", 10), "test");
         assert_eq!(shorten_string("test", 3), "tes...");
+    }
+
+    #[test]
+    fn test_parse_args() {
+        let args = Args {
+            help: false,
+            root_path: "mock".to_owned(),
+            host: Some("http://localhost:8200".to_owned()),
+            token: Some("test_token".to_owned()),
+        };
+        let parsed = parse_args(args).unwrap();
+
+        assert_eq!(parsed.host, "http://localhost:8200");
+        assert_eq!(parsed.token, "test_token");
+        assert_eq!(parsed.root, "mock/");
+    }
+
+    #[test]
+    fn test_vaultwalker() {
+        let mut vw = Vaultwalker::new(MockClient {}, "mock/".to_owned()).unwrap();
+
+        // test the initial state
+        assert!(vw.update_list(FromCache::No).is_ok());
+        assert_eq!(vw.selected_item, 0);
+        assert_eq!(vw.current_list.len(), 15);
+        assert_eq!(vw.current_list[0].name, "key1");
+        assert!(vw.current_list[0].is_dir);
+        assert_eq!(vw.get_selected_path(), "mock/key1");
+        assert!(vw.selected_secret.is_none());
+        assert!(vw.update_selected_secret(FromCache::No).is_ok());
+        assert!(vw.refresh_all().is_ok());
+        assert_eq!(
+            vw.selected_line_for_current_mode(&vw.current_list[0], 80)
+                .unwrap(),
+            "> key1/"
+        );
+
+        // test with a key
+        assert!(vw.set_selected_item("key2", FromCache::No).is_ok());
+        assert_eq!(vw.selected_item, 1);
+        assert_eq!(vw.get_selected_path(), "mock/key2");
+        assert!(vw.selected_secret.is_some());
+        let secret = vw.selected_secret.as_ref().unwrap();
+        assert_eq!(<&VaultSecret as Into<String>>::into(secret), "value");
+        assert_eq!(
+            vw.selected_line_for_current_mode(&vw.current_list[0], 80)
+                .unwrap(),
+            "> key1/ -> \u{1b}[1mvalue\u{1b}[0m"
+        );
+        assert_eq!(
+            vw.selected_line_for_current_mode(&vw.current_list[0], 15)
+                .unwrap(),
+            "> key1/ -> \u{1b}[1mv...\u{1b}[0m"
+        );
+
+        // test to rename a key into a key that already exists
+        assert_eq!(
+            vw.rename_key("key3").unwrap_err().to_string(),
+            "the key 'key3' already exists"
+        );
     }
 }
