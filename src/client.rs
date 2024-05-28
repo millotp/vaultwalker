@@ -152,6 +152,43 @@ impl HttpClient for UreqClient {
     }
 }
 
+pub struct MockClient {}
+
+impl HttpClient for MockClient {
+    fn read<T: DeserializeOwned>(
+        &mut self,
+        method: &str,
+        path: &str,
+        _cache: FromCache,
+    ) -> Result<VaultResponse<T>> {
+        Ok(VaultResponse {
+            request_id: "mock".to_string(),
+            lease_id: None,
+            renewable: None,
+            data: match method {
+                "GET" => Some(serde_json::from_str("{\"secret\":\"value\"}")?),
+                "LIST" => Some(match path {
+                    "v1/mock/key1/" => serde_json::from_str("{\"keys\":[\"key\"]}")?,
+                    _ => serde_json::from_str("{\"keys\":[\"key1/\",\"key2\",\"key3\",\"key4\",\"key5\",\"key6\",\"key7\",\"key8\",\"key9/\",\"key10\",\"key11\",\"key12\",\"key13\",\"key14\",\"key15/\"]}")?,
+                }),
+                _ => None,
+            },
+            warnings: None,
+        })
+    }
+
+    fn write<TBody: Serialize>(
+        &mut self,
+        _method: &str,
+        _path: &str,
+        _body: Option<TBody>,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    fn clear_cache(&mut self) {}
+}
+
 pub struct VaultClient<H: HttpClient> {
     client: H,
 }

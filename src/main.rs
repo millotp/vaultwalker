@@ -21,7 +21,7 @@ use crossterm::{
     },
 };
 
-use client::{FromCache, HttpClient, UreqClient, VaultSecret};
+use client::{FromCache, HttpClient, MockClient, UreqClient, VaultSecret};
 use error::{Error, Result};
 use gumdrop::Options;
 use home::home_dir;
@@ -666,11 +666,17 @@ struct ParsedArgs {
 }
 
 fn run(host: String, token: String, root: String) -> Result<()> {
-    let ureq_client = UreqClient::new(&host, &token);
-    let mut vaultwalker = Vaultwalker::new(ureq_client, root)?;
-
-    vaultwalker.setup()?;
-    vaultwalker.input_loop()
+    if root == "mock/" {
+        let mock_client = MockClient {};
+        let mut vaultwalker = Vaultwalker::new(mock_client, root)?;
+        vaultwalker.setup()?;
+        vaultwalker.input_loop()
+    } else {
+        let http_client = UreqClient::new(&host, &token);
+        let mut vaultwalker = Vaultwalker::new(http_client, root)?;
+        vaultwalker.setup()?;
+        vaultwalker.input_loop()
+    }
 }
 
 fn parse_args() -> Result<ParsedArgs> {
