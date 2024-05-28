@@ -6,7 +6,15 @@ A command line interface to browse and edit [Vault](https://www.vaultproject.io/
 
 ## How to install
 
-`cargo install vaultwalker`
+Install the correct binary for your platform
+```sh
+curl -s 'https://i.jpillora.com/millotp/vaultwalker!?as=vw' | bash
+```
+
+Or build from source:
+```sh
+cargo install vaultwalker
+```
 
 If you have the vault cli already installed, you can simply use:
 ```sh
