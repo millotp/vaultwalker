@@ -122,7 +122,7 @@ enum Mode {
 
 struct Vaultwalker<H: HttpClient> {
     client: VaultClient<H>,
-    clipboard: ClipboardContext,
+    clipboard: Option<ClipboardContext>,
     mode: Mode,
     quit_requested: bool,
     path: VaultPath,
@@ -141,7 +141,7 @@ impl<H: HttpClient> Vaultwalker<H> {
         let path = VaultPath::decode(&root);
         let vw = Self {
             client: VaultClient::new(http_client),
-            clipboard: ClipboardProvider::new().unwrap(),
+            clipboard: ClipboardProvider::new().ok(),
             mode: Mode::Navigation,
             quit_requested: false,
             root_len: path.entries.len(),
@@ -444,21 +444,25 @@ impl<H: HttpClient> Vaultwalker<H> {
                 KeyCode::Char('o') => {
                     self.print_controls()?;
                 }
-                KeyCode::Char('p') => {
-                    self.clipboard
-                        .set_contents(self.get_selected_path())
-                        .unwrap();
+                KeyCode::Char('p') if self.clipboard.is_some() => {
+                    let path = self.get_selected_path();
+                    self.clipboard.as_mut().unwrap().set_contents(path).unwrap();
 
                     self.print_info("path copied to clipboard")?;
                 }
-                KeyCode::Char('s') => {
+                KeyCode::Char('s') if self.clipboard.is_some() => {
                     let entry = &self.current_list[self.selected_item];
                     if entry.is_dir {
                         return Ok(());
                     }
 
                     if let Some(secret) = self.selected_secret.as_ref() {
-                        self.clipboard.set_contents(secret.into()).unwrap();
+                        let secret = secret.into();
+                        self.clipboard
+                            .as_mut()
+                            .unwrap()
+                            .set_contents(secret)
+                            .unwrap();
 
                         self.print_info("secret copied to clipboard")?;
                     }
