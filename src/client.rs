@@ -26,26 +26,6 @@ pub struct VaultResponse<D> {
     pub warnings: Option<Vec<String>>,
 }
 
-/// Response sent by vault when issuing a `LIST` request.
-#[derive(Deserialize, Debug)]
-pub struct ListResponse {
-    /// keys will include the items listed
-    pub keys: Vec<String>,
-}
-
-#[derive(PartialEq, Clone, Copy)]
-pub enum FromCache {
-    Yes,
-    No,
-}
-
-pub struct VaultClient {
-    client: Agent,
-    vault_addr: String,
-    token: String,
-    cache: HashMap<String, String>,
-}
-
 #[derive(Serialize, Deserialize, Debug)]
 pub struct VaultSecret {
     secret: Option<String>,
@@ -62,20 +42,42 @@ impl From<&VaultSecret> for String {
     }
 }
 
-impl VaultClient {
-    pub fn new(addr: &str, token: &str) -> VaultClient {
-        let client = AgentBuilder::new()
-            .timeout_read(Duration::from_secs(5))
-            .timeout_write(Duration::from_secs(5))
-            .build();
-        VaultClient {
-            client,
-            vault_addr: addr.to_string(),
-            token: token.into(),
-            cache: HashMap::new(),
-        }
-    }
+/// Response sent by vault when issuing a `LIST` request.
+#[derive(Deserialize, Debug)]
+pub struct ListResponse {
+    /// keys will include the items listed
+    pub keys: Vec<String>,
+}
 
+#[derive(PartialEq, Clone, Copy)]
+pub enum FromCache {
+    Yes,
+    No,
+}
+
+pub trait HttpClient {
+    fn read<T: DeserializeOwned>(
+        &mut self,
+        method: &str,
+        path: &str,
+        cache: FromCache,
+    ) -> Result<VaultResponse<T>>;
+    fn write<TBody: Serialize>(
+        &mut self,
+        method: &str,
+        path: &str,
+        body: Option<TBody>,
+    ) -> Result<()>;
+}
+
+pub struct VaultClient {
+    client: Agent,
+    vault_addr: String,
+    token: String,
+    cache: HashMap<String, String>,
+}
+
+impl HttpClient for VaultClient {
     fn read<T: DeserializeOwned>(
         &mut self,
         method: &str,
@@ -126,6 +128,21 @@ impl VaultClient {
         match res {
             Ok(_) => Ok(()),
             Err(err) => Err(Error::Ureq(Box::new(err))),
+        }
+    }
+}
+
+impl VaultClient {
+    pub fn new(addr: &str, token: &str) -> Self {
+        let client = AgentBuilder::new()
+            .timeout_read(Duration::from_secs(5))
+            .timeout_write(Duration::from_secs(5))
+            .build();
+        Self {
+            client,
+            vault_addr: addr.to_string(),
+            token: token.into(),
+            cache: HashMap::new(),
         }
     }
 

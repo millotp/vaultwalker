@@ -701,3 +701,45 @@ fn main() {
         std::process::exit(0);
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_vault_entry_display() {
+        let entry = VaultEntry {
+            name: "test".to_owned(),
+            is_dir: false,
+        };
+
+        assert_eq!(format!("{}", entry), "test");
+
+        let entry = VaultEntry {
+            name: "test".to_owned(),
+            is_dir: true,
+        };
+
+        assert_eq!(format!("{}", entry), "test/");
+    }
+
+    #[test]
+    fn test_vault_path() {
+        let path = VaultPath::decode("test/dir");
+
+        assert_eq!(path.entries.len(), 2);
+        assert_eq!(path.entries[0].name, "test");
+        assert_eq!(path.entries[0].is_dir, true);
+        assert_eq!(path.entries[1].name, "dir");
+        assert_eq!(path.entries[1].is_dir, false);
+
+        assert_eq!(path.len(), 9);
+        assert_eq!(path.join(), "test/dir");
+    }
+
+    #[test]
+    fn test_shorten_string() {
+        assert_eq!(shorten_string("test", 10), "test");
+        assert_eq!(shorten_string("test", 3), "tes...");
+    }
+}
