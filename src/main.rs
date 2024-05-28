@@ -362,9 +362,11 @@ impl<H: HttpClient> Vaultwalker<H> {
         }
 
         self.displayed_message = Some(message.content().clone());
+        let (width, height) = terminal::size()?;
+        let offset = 1 + message.content().len() / width as usize;
         execute!(
             stdout(),
-            MoveTo(0, 10000),
+            MoveTo(0, (height - offset as u16).max(0)),
             Clear(ClearType::CurrentLine),
             Print(message),
         )?;
