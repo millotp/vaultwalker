@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.3] - 2024-05-28
+
+### 🐛 Bug Fixes
+
+- Better error messages
+
+### ⚙️ Miscellaneous Tasks
+
+- Add install link for binaries
+- Update README with all features
+
 ## [0.4.2] - 2024-05-27
 
 ### 🐛 Bug Fixes
