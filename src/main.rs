@@ -12,7 +12,7 @@ extern crate clipboard;
 use clipboard::{ClipboardContext, ClipboardProvider};
 use crossterm::{
     cursor::{self, MoveDown, MoveTo, MoveToNextLine},
-    event::{read, Event, KeyCode, KeyModifiers},
+    event::{read, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute,
     style::{Print, StyledContent, Stylize},
     terminal::{
@@ -274,7 +274,8 @@ impl<H: HttpClient> Vaultwalker<H> {
     }
 
     fn print(&mut self) -> Result<()> {
-        execute!(stdout(), Clear(ClearType::All), MoveTo(0, 0))?;
+        // on windows, the cursor must be hidden again when the terminal is cleared
+        execute!(stdout(), Clear(ClearType::All), cursor::Hide, MoveTo(0, 0))?;
         let (width, height) = terminal::size()?;
 
         let mut extended_item = Vec::new();
@@ -390,6 +391,9 @@ impl<H: HttpClient> Vaultwalker<H> {
     fn handle_navigation(&mut self) -> Result<()> {
         let mut needs_refresh = false;
         if let Event::Key(event) = read()? {
+            if event.kind != KeyEventKind::Press {
+                return Ok(());
+            }
             match event.code {
                 KeyCode::Down | KeyCode::Char('j') => {
                     if self.selected_item < self.current_list.len() - 1 {
@@ -751,9 +755,9 @@ mod tests {
 
         assert_eq!(path.entries.len(), 2);
         assert_eq!(path.entries[0].name, "test");
-        assert_eq!(path.entries[0].is_dir, true);
+        assert!(path.entries[0].is_dir);
         assert_eq!(path.entries[1].name, "dir");
-        assert_eq!(path.entries[1].is_dir, false);
+        assert!(!path.entries[1].is_dir);
 
         assert_eq!(path.len(), 9);
         assert_eq!(path.join(), "test/dir");
